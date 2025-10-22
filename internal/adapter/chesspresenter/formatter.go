@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kapu/kakao-cheese-bot-go/internal/util"
-	"github.com/kapu/kakao-cheese-bot-go/pkg/chessdto"
+	"github.com/park285/Cheese-KakaoTalk-bot/internal/util"
+	"github.com/park285/Cheese-KakaoTalk-bot/pkg/chessdto"
 )
 
 const (

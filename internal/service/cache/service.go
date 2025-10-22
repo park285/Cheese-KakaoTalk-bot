@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kapu/kakao-cheese-bot-go/pkg/errors"
+	"github.com/park285/Cheese-KakaoTalk-bot/pkg/errors"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )

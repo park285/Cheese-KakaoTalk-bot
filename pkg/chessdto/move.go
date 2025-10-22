@@ -2,7 +2,6 @@ package chessdto
 
 import "time"
 
-// AssistSuggestion represents a hint produced by the chess engine.
 type AssistSuggestion struct {
 	MoveUCI      string
 	MoveSAN      string
@@ -11,7 +10,6 @@ type AssistSuggestion struct {
 	Duration     time.Duration
 }
 
-// MoveSummary summarises player and engine moves after executing a single turn.
 type MoveSummary struct {
 	State            *SessionState
 	PlayerSAN        string

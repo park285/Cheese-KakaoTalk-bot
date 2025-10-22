@@ -4,8 +4,8 @@ import (
     "context"
     "fmt"
     nchess "github.com/corentings/chess/v2"
-    "github.com/kapu/kakao-cheese-bot-go/pkg/chessdto"
-    svcchess "github.com/kapu/kakao-cheese-bot-go/internal/service/chess"
+    "github.com/park285/Cheese-KakaoTalk-bot/pkg/chessdto"
+    svcchess "github.com/park285/Cheese-KakaoTalk-bot/internal/service/chess"
 )
 
 // ToDTO renders PNG using the shared chess renderer and returns a DTO SessionState for presenter.Board.
@@ -47,4 +47,3 @@ func lastHighlight(game *nchess.Game) *svcchess.MoveHighlight {
     mv := moves[len(moves)-1]
     return &svcchess.MoveHighlight{From: mv.S1(), To: mv.S2()}
 }
-

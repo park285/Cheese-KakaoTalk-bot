@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kapu/kakao-cheese-bot-go/internal/domain"
+	"github.com/park285/Cheese-KakaoTalk-bot/internal/domain"
 )
 
 var ErrDuplicateGame = errors.New("chess game already exists")

@@ -6,7 +6,7 @@ import (
     "strings"
     "sync"
 
-    "github.com/kapu/kakao-cheese-bot-go/internal/domain"
+    "github.com/park285/Cheese-KakaoTalk-bot/internal/domain"
 )
 
 // memrepo is a development-only in-memory repository implementation used when no DB is configured.
@@ -130,4 +130,3 @@ func (m *memrepo) sessionKey(sessionUUID, playerHash string) string {
 func (m *memrepo) profileKey(playerHash, roomHash string) string {
     return strings.TrimSpace(playerHash) + "|" + strings.TrimSpace(roomHash)
 }
-

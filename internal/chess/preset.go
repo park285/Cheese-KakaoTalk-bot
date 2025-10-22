@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kapu/kakao-cheese-bot-go/internal/chess/openingbook"
+	"github.com/park285/Cheese-KakaoTalk-bot/internal/chess/openingbook"
 )
 
 type DifficultyPreset struct {

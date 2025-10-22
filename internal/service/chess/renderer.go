@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	nchess "github.com/corentings/chess/v2"
-	fontassets "github.com/kapu/kakao-cheese-bot-go/internal/assets/fonts"
+	fontassets "github.com/park285/Cheese-KakaoTalk-bot/internal/assets/fonts"
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 )

@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"strings"
 
-	"github.com/kapu/kakao-cheese-bot-go/pkg/chessdto"
+	"github.com/park285/Cheese-KakaoTalk-bot/pkg/chessdto"
 )
 
 // Presenter delivers formatted messages and board images without coupling to the command layer.

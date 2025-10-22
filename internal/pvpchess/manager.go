@@ -15,7 +15,7 @@ import (
 
     nchess "github.com/corentings/chess/v2"
     "github.com/redis/go-redis/v9"
-    svcchess "github.com/kapu/kakao-cheese-bot-go/internal/service/chess"
+    svcchess "github.com/park285/Cheese-KakaoTalk-bot/internal/service/chess"
 )
 
 type Manager struct {

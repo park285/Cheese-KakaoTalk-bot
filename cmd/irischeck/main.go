@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/kapu/kakao-cheese-bot-go/internal/irisfast"
+	"github.com/park285/Cheese-KakaoTalk-bot/internal/irisfast"
 )
 
 func main() {

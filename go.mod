@@ -1,4 +1,4 @@
-module github.com/kapu/kakao-cheese-bot-go
+module github.com/park285/Cheese-KakaoTalk-bot
 
 go 1.24.0
 

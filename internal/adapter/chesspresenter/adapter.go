@@ -2,9 +2,9 @@ package chesspresenter
 
 import (
     nchess "github.com/corentings/chess/v2"
-    svc "github.com/kapu/kakao-cheese-bot-go/internal/service/chess"
-    "github.com/kapu/kakao-cheese-bot-go/internal/domain"
-    "github.com/kapu/kakao-cheese-bot-go/pkg/chessdto"
+    svc "github.com/park285/Cheese-KakaoTalk-bot/internal/service/chess"
+    "github.com/park285/Cheese-KakaoTalk-bot/internal/domain"
+    "github.com/park285/Cheese-KakaoTalk-bot/pkg/chessdto"
 )
 
 func ToDTOState(s *svc.SessionState) *chessdto.SessionState {

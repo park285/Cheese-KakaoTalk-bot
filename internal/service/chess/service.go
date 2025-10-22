@@ -13,9 +13,9 @@ import (
 	nchess "github.com/corentings/chess/v2"
 	"github.com/corentings/chess/v2/opening"
 	"github.com/google/uuid"
-	corechess "github.com/kapu/kakao-cheese-bot-go/internal/chess"
-	"github.com/kapu/kakao-cheese-bot-go/internal/domain"
-	"github.com/kapu/kakao-cheese-bot-go/internal/service/cache"
+    corechess "github.com/park285/Cheese-KakaoTalk-bot/internal/chess"
+    "github.com/park285/Cheese-KakaoTalk-bot/internal/domain"
+    "github.com/park285/Cheese-KakaoTalk-bot/internal/service/cache"
 	"go.uber.org/zap"
 )
 

@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kapu/kakao-cheese-bot-go/internal/chess/openingbook"
-	"github.com/kapu/kakao-cheese-bot-go/internal/chess/uci"
+	"github.com/park285/Cheese-KakaoTalk-bot/internal/chess/openingbook"
+	"github.com/park285/Cheese-KakaoTalk-bot/internal/chess/uci"
 )
 
 const (

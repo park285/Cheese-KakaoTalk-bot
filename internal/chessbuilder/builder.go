@@ -10,10 +10,10 @@ import (
     "time"
 
     _ "github.com/lib/pq"
-    corechess "github.com/kapu/kakao-cheese-bot-go/internal/chess"
-    "github.com/kapu/kakao-cheese-bot-go/internal/config"
-    "github.com/kapu/kakao-cheese-bot-go/internal/service/cache"
-    svcchess "github.com/kapu/kakao-cheese-bot-go/internal/service/chess"
+    corechess "github.com/park285/Cheese-KakaoTalk-bot/internal/chess"
+    "github.com/park285/Cheese-KakaoTalk-bot/internal/config"
+    "github.com/park285/Cheese-KakaoTalk-bot/internal/service/cache"
+    svcchess "github.com/park285/Cheese-KakaoTalk-bot/internal/service/chess"
     "go.uber.org/zap"
 )
 
