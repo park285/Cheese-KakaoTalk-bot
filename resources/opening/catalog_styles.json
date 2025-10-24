@@ -1,0 +1,59 @@
+{
+  "groups": [
+    {
+      "key": "aggressive",
+      "label": "공격형",
+      "description": "초반부터 급격한 전투를 유도하거나 상대 킹을 직접 압박하는 변형",
+      "entries": [
+        {"eco": "B90", "title": "Sicilian Defense: Najdorf Variation, English Attack"},
+        {"eco": "D31", "title": "Semi-Slav Defense: Marshall Gambit, Main Line"}
+      ]
+    },
+    {
+      "key": "dynamic",
+      "label": "역습형",
+      "description": "주도권을 상대에게 맡기는 대신 중앙·퀸사이드에서 활발한 역습을 노리는 변형",
+      "entries": [
+        {"eco": "B50", "title": "Sicilian Defense: Modern Variations"},
+        {"eco": "C80", "title": "Ruy Lopez: Open"}
+      ]
+    },
+    {
+      "key": "solid",
+      "label": "안정형",
+      "description": "중앙을 견고하게 지키고 느린 전개로 장기전을 지향하는 변형",
+      "entries": [
+        {"eco": "C53", "title": "Italian Game: Classical Variation, Giuoco Pianissimo"},
+        {"eco": "D02", "title": "Queen's Pawn Game: Symmetrical Variation"},
+        {"eco": "D12", "title": "Slav Defense: Quiet Variation, Schallopp Defense"},
+        {"eco": "D30", "title": "Queen's Gambit Declined"},
+        {"eco": "D37", "title": "Queen's Gambit Declined: Three Knights Variation"}
+      ]
+    },
+    {
+      "key": "balanced",
+      "label": "균형형",
+      "description": "공격과 수비 선택지가 모두 열려 있고 상대 반응에 따라 전략을 유연하게 조정하는 변형",
+      "entries": [
+        {"eco": "C50", "title": "Giuoco Piano"},
+        {"eco": "C84", "title": "Ruy Lopez: Closed, Martinez Variation"}
+      ]
+    },
+    {
+      "key": "hypermodern",
+      "label": "하이퍼모던",
+      "description": "기물 개발로 원거리에서 중심을 압박하며, 직접적인 폰 점유보다 기동성을 중시하는 변형",
+      "entries": [
+        {"eco": "A46", "title": "Indian Defense: Knights Variation"}
+      ]
+    },
+    {
+      "key": "positional",
+      "label": "포지셔널",
+      "description": "장기적인 구조 우위를 노리고 전략적 운영에 중점을 두는 변형",
+      "entries": [
+        {"eco": "E06", "title": "Catalan Opening: Closed"}
+      ]
+    }
+  ]
+}

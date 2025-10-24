@@ -41,12 +41,12 @@ func (f *Formatter) Prefix() string {
 }
 
 func (f *Formatter) Start(state *chessdto.SessionState, resumed bool) string {
-	if state == nil {
-		if resumed {
-			return fmt.Sprintf("진행 중인 체스 게임 정보를 불러오지 못했습니다. `%s체스 현황` 명령으로 다시 확인해주세요.", f.Prefix())
-		}
-		return fmt.Sprintf("체스 게임을 시작할 수 없습니다. `%s체스 시작`을 다시 시도해주세요.", f.Prefix())
-	}
+    if state == nil {
+        if resumed {
+            return fmt.Sprintf("진행 중인 체스 게임 정보를 불러오지 못했습니다. `%s 현황` 명령으로 다시 확인해주세요.", f.Prefix())
+        }
+        return fmt.Sprintf("체스 게임을 시작할 수 없습니다. `%s 시작`을 다시 시도해주세요.", f.Prefix())
+    }
 
 	var sb strings.Builder
 	if resumed {
@@ -71,12 +71,12 @@ func (f *Formatter) Start(state *chessdto.SessionState, resumed bool) string {
 	}
 	prefix := f.Prefix()
 	sb.WriteString("• 플레이어는 백으로 시작합니다.\n")
-	sb.WriteString("\n이동 방법: `")
-	sb.WriteString(prefix)
-	sb.WriteString("체스 <수>` .\n")
-	sb.WriteString("무르기 기능: `")
-	sb.WriteString(prefix)
-	sb.WriteString("체스 무르기`.\n")
+    sb.WriteString("\n이동 방법: `")
+    sb.WriteString(prefix)
+    sb.WriteString(" <수>` .\n")
+    sb.WriteString("무르기 기능: `")
+    sb.WriteString(prefix)
+    sb.WriteString(" 무르기`.\n")
 	sb.WriteString("난이도 선택: level1~level8.")
 	return sb.String()
 }
@@ -90,7 +90,7 @@ func (f *Formatter) Assist(suggestion *chessdto.AssistSuggestion) string {
 	if move == "" {
 		return "엔진이 추천 수를 제공하지 못했습니다."
 	}
-	return f.Prefix() + "체스 " + move
+    return f.Prefix() + " " + move
 }
 
 func (f *Formatter) Move(summary *chessdto.MoveSummary) string {
@@ -148,13 +148,13 @@ func (f *Formatter) Status(state *chessdto.SessionState) string {
 	appendCapturedLine(&sb, state.Captured)
 
 	prefix := f.Prefix()
-	sb.WriteString("\n명령: `")
-	sb.WriteString(prefix)
-	sb.WriteString("체스 <수>` (SAN/UCI)\n기권: `")
-	sb.WriteString(prefix)
-	sb.WriteString("체스 기권`\n무르기: `")
-	sb.WriteString(prefix)
-	sb.WriteString("체스 무르기`.")
+    sb.WriteString("\n명령: `")
+    sb.WriteString(prefix)
+    sb.WriteString(" <수>` (SAN/UCI)\n기권: `")
+    sb.WriteString(prefix)
+    sb.WriteString(" 기권`\n무르기: `")
+    sb.WriteString(prefix)
+    sb.WriteString(" 무르기`.")
 	return sb.String()
 }
 
@@ -181,24 +181,24 @@ func (f *Formatter) Resign(state *chessdto.SessionState) string {
 }
 
 func (f *Formatter) Help() string {
-	content := fmt.Sprintf(`%s
-• %s체스 시작 [난이도]
+    content := fmt.Sprintf(`%s
+• %s 시작 [난이도]
   새 게임 시작 (난이도: level1~level8)
-• %s체스 <수> (예: e2e4)
+• %s <수> (예: e2e4)
   SAN/UCI 모두 입력 가능
-• %s체스 기권
+• %s 기권
   즉시 기권하고 세션 종료
-• %s체스 무르기
+• %s 무르기
   마지막 한 수(플레이어+봇) 되돌리기
-• %s체스 기록 [n]
+• %s 기록 [n]
   최근 기보 확인 (기본 10개)
-• %s체스 기보 <ID>
+• %s 기보 <ID>
   특정 기보 상세 보기
-• %s체스 프로필
+• %s 프로필
   개인 승률·레이팅 확인`, chessHelpInstruction,
-		f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix())
+        f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix())
 
-	return util.ApplyKakaoSeeMorePadding(stripChessHeader(content, chessHelpInstruction), chessHelpInstruction)
+    return util.ApplyKakaoSeeMorePadding(stripChessHeader(content, chessHelpInstruction), chessHelpInstruction)
 }
 
 func (f *Formatter) History(games []*chessdto.ChessGame) string {
@@ -218,7 +218,7 @@ func (f *Formatter) History(games []*chessdto.ChessGame) string {
 			sb.WriteString(fmt.Sprintf("  소요 시간: %s\n", durationText))
 		}
 	}
-	sb.WriteString(fmt.Sprintf("\n자세히 보려면 `%s체스 기보 <ID>` 명령을 사용하세요.", f.Prefix()))
+    sb.WriteString(fmt.Sprintf("\n자세히 보려면 `%s 기보 <ID>` 명령을 사용하세요.", f.Prefix()))
 
 	content := sb.String()
 	if strings.TrimSpace(content) == "" {
@@ -274,8 +274,8 @@ func (f *Formatter) Profile(profile *chessdto.ChessProfile) string {
 	if !profile.LastPlayedAt.IsZero() {
 		sb.WriteString(fmt.Sprintf("• 마지막 경기: %s\n", formatShortTime(profile.LastPlayedAt)))
 	}
-	prefix := f.Prefix()
-	sb.WriteString(fmt.Sprintf("\n새 게임: `%s체스 시작`, 기록: `%s체스 기록`, 기보 상세: `%s체스 기보 <ID>`", prefix, prefix, prefix))
+    prefix := f.Prefix()
+    sb.WriteString(fmt.Sprintf("\n새 게임: `%s 시작`, 기록: `%s 기록`, 기보 상세: `%s 기보 <ID>`", prefix, prefix, prefix))
 
 	content := sb.String()
 	if !strings.HasPrefix(content, chessProfileInstruction) {
@@ -293,7 +293,7 @@ func (f *Formatter) PreferredPresetUpdated(profile *chessdto.ChessProfile) strin
 	if info := formatProfileSummary(profile, 0); info != "" {
 		sb.WriteString(info)
 	}
-	sb.WriteString(fmt.Sprintf("새 게임 시작: `%s체스 시작`", f.Prefix()))
+    sb.WriteString(fmt.Sprintf("새 게임 시작: `%s 시작`", f.Prefix()))
 	return sb.String()
 }
 
@@ -310,15 +310,15 @@ func (f *Formatter) Undo(state *chessdto.SessionState) string {
 	}
 	appendMaterialLine(&sb, state.Material)
 	appendCapturedLine(&sb, state.Captured)
-	sb.WriteString("\n이제 다시 당신의 턴입니다. `")
-	sb.WriteString(f.Prefix())
-	sb.WriteString("체스 <수>` 형식으로 새 수를 입력하세요.")
-	sb.WriteString(fmt.Sprintf("\n최근 기록은 `%s체스 기록`으로 확인할 수 있습니다.", f.Prefix()))
+    sb.WriteString("\n이제 다시 당신의 턴입니다. `")
+    sb.WriteString(f.Prefix())
+    sb.WriteString(" <수>` 형식으로 새 수를 입력하세요.")
+    sb.WriteString(fmt.Sprintf("\n최근 기록은 `%s 기록`으로 확인할 수 있습니다.", f.Prefix()))
 	return sb.String()
 }
 
 func (f *Formatter) NoSession() string {
-	return fmt.Sprintf("진행 중인 체스 게임이 없습니다. `%s체스 시작`으로 새 게임을 시작하세요.", f.Prefix())
+    return fmt.Sprintf("진행 중인 체스 게임이 없습니다. `%s 시작`으로 새 게임을 시작하세요.", f.Prefix())
 }
 
 func stripChessHeader(text, header string) string {

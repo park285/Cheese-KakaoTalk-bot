@@ -8,10 +8,10 @@ import (
 )
 
 type AppConfig struct {
-	IrisBaseURL string
-	IrisWSURL   string
+    IrisBaseURL string
+    IrisWSURL   string
 
-	BotPrefix string
+    BotPrefix string
 
 	XUserID    string
 	XUserEmail string
@@ -20,9 +20,8 @@ type AppConfig struct {
 	RedisURL    string
 	DatabaseURL string
 
-	AllowRandomMatch   bool
-	MaxConcurrentGames int
-	TimeControl        string
+    AllowRandomMatch   bool
+    MaxConcurrentGames int
 
 	AllowedRooms []string
 
@@ -31,15 +30,17 @@ type AppConfig struct {
 	ChessSessionTTLSec    int
 	ChessHistoryLimit     int
 	ChessOpeningMaxPly    int
-	ChessOpeningMinWeight int
-	ChessOpeningStyle     string
+    ChessOpeningMinWeight int
+    ChessOpeningStyle     string
+
+    // When true, run in PvP-only mode: do not initialize single-player engine/service
+    PvpOnly bool
 }
 
 func Load() (*AppConfig, error) {
 	cfg := &AppConfig{
 		AllowRandomMatch:   false,
 		MaxConcurrentGames: 200,
-		TimeControl:        "none",
 		ChessDefaultPreset: "level3",
 		ChessSessionTTLSec: 3600,
 		ChessHistoryLimit:  10,
@@ -77,9 +78,7 @@ func Load() (*AppConfig, error) {
 			cfg.MaxConcurrentGames = n
 		}
 	}
-	if v := strings.TrimSpace(os.Getenv("TIME_CONTROL")); v != "" {
-		cfg.TimeControl = v
-	}
+    // time control removed
 
 	// Chess specific
 	cfg.StockfishPath = strings.TrimSpace(os.Getenv("STOCKFISH_PATH"))
@@ -106,7 +105,14 @@ func Load() (*AppConfig, error) {
 			cfg.ChessOpeningMinWeight = n
 		}
 	}
-	cfg.ChessOpeningStyle = strings.TrimSpace(os.Getenv("CHESS_OPENING_DEFAULT_STYLE"))
+    cfg.ChessOpeningStyle = strings.TrimSpace(os.Getenv("CHESS_OPENING_DEFAULT_STYLE"))
+
+    // PvP-only mode (disables single-player engine)
+    if v := strings.TrimSpace(os.Getenv("CHESS_PVP_ONLY")); v != "" {
+        if b, err := strconv.ParseBool(v); err == nil {
+            cfg.PvpOnly = b
+        }
+    }
 
 	if len(cfg.AllowedRooms) == 0 {
 		if v := strings.TrimSpace(os.Getenv("CHESS_ALLOWED_ROOMS")); v != "" {

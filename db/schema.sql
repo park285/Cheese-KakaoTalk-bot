@@ -49,7 +49,6 @@ CREATE TABLE IF NOT EXISTS pvp_games (
   black_name TEXT NOT NULL,
   origin_room TEXT NOT NULL DEFAULT '',
   resolve_room TEXT NOT NULL DEFAULT '',
-  time_control TEXT NOT NULL DEFAULT '',
   result TEXT NOT NULL,
   result_method TEXT NOT NULL DEFAULT '',
   moves_uci JSONB NOT NULL DEFAULT '[]',

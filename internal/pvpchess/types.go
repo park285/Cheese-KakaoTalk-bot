@@ -20,6 +20,7 @@ const (
     StatusFinished Status = "FINISHED"
     StatusResigned Status = "RESIGNED"
     StatusDraw     Status = "DRAW"
+    StatusAborted  Status = "ABORTED"
 )
 
 // Game is the persisted state of a PvP match.
@@ -39,11 +40,9 @@ type Game struct {
     OriginRoom    string `json:"origin_room"`
     ResolveRoom   string `json:"resolve_room"`
 
-    TimeControl   string    `json:"time_control"`
     CreatedAt     time.Time `json:"created_at"`
     UpdatedAt     time.Time `json:"updated_at"`
 
     Winner        string `json:"winner,omitempty"`
     Outcome       string `json:"outcome,omitempty"`
 }
-

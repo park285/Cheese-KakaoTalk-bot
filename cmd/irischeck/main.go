@@ -3,40 +3,27 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
 	"github.com/park285/Cheese-KakaoTalk-bot/internal/irisfast"
+    "github.com/park285/Cheese-KakaoTalk-bot/internal/obslog"
+    "go.uber.org/zap"
 )
 
 func main() {
+    // 로깅 초기화
+    _ = obslog.InitFromEnv()
+    logger := obslog.L()
 	baseURL := os.Getenv("IRIS_BASE_URL")
 	wsURL := os.Getenv("IRIS_WS_URL")
-	userID := os.Getenv("X_USER_ID")
-	userEmail := os.Getenv("X_USER_EMAIL")
-	sessionID := os.Getenv("X_SESSION_ID")
 
 	if baseURL == "" {
-		log.Fatal("IRIS_BASE_URL is required")
+		logger.Fatal("iris_base_url_required")
 	}
 
-	headers := func() map[string]string {
-		m := map[string]string{}
-		if userID != "" {
-			m["X-User-Id"] = userID
-		}
-		if userEmail != "" {
-			m["X-User-Email"] = userEmail
-		}
-		if sessionID != "" {
-			m["X-Session-Id"] = sessionID
-		}
-		return m
-	}
-
+	// Align with legacy: do not inject custom HTTP headers
 	client := irisfast.NewClient(baseURL,
-		irisfast.WithHeaderProvider(headers),
 		irisfast.WithTimeout(8*time.Second),
 	)
 
@@ -44,34 +31,35 @@ func main() {
 	defer cancel()
 	cfg, err := client.GetConfig(ctx)
 	if err != nil {
-		log.Printf("/config error: %v", err)
+		logger.Error("config_error", zap.Error(err))
 	} else {
-		log.Printf("/config ok: port=%d polling=%d rate=%d endpoint=%s", cfg.Port, cfg.PollingSpeed, cfg.MessageRate, cfg.WebserverEndpoint)
+		logger.Info("config_ok", zap.Int("port", cfg.Port), zap.Int("polling", cfg.PollingSpeed), zap.Int("rate", cfg.MessageRate), zap.String("endpoint", cfg.WebserverEndpoint))
 	}
 
 	if wsURL == "" {
-		log.Println("IRIS_WS_URL not set; skipping WS check")
+		logger.Info("ws_url_not_set", zap.String("action", "skip_ws_check"))
 		return
 	}
 
     ws := irisfast.NewWebSocket(wsURL, 5, time.Second)
-    // Propagate headers to WS handshake if needed
-    ws.SetHeaderProvider(headers)
+    ws.SetLogger(logger)
     ws.OnStateChange(func(state irisfast.WebSocketState) {
-        log.Printf("WS state: %s", state)
+        logger.Info("ws_state_cb", zap.String("state", state.String()))
     })
 	ws.OnMessage(func(msg *irisfast.Message) {
 		from := "?"
 		if msg.Sender != nil {
 			from = *msg.Sender
 		}
-		fmt.Printf("WS msg room=%s from=%s text=%q\n", msg.Room, from, msg.Msg)
+		// PII 최소화: 메시지 본문 미출력
+		logger.Info("ws_message", zap.String("room", msg.Room), zap.String("from", from))
+		_ = fmt.Sprintf("") // keep fmt import
 	})
 
 	cctx, ccancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer ccancel()
 	if err := ws.Connect(cctx); err != nil {
-		log.Printf("WS connect error: %v", err)
+		logger.Error("ws_connect_error", zap.Error(err))
 		return
 	}
 

@@ -3,6 +3,7 @@ module github.com/park285/Cheese-KakaoTalk-bot
 go 1.24.0
 
 require (
+	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/corentings/chess/v2 v2.3.2
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
@@ -21,6 +22,7 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/klauspost/compress v1.18.1 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20251017212417-90e834f514db // indirect
 	golang.org/x/net v0.46.0 // indirect

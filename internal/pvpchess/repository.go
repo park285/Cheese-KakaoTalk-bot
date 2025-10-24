@@ -63,11 +63,11 @@ func (r *Repository) SaveResult(ctx context.Context, g *Game, method string) err
 
     q := `INSERT INTO pvp_games (
         game_id, white_id, white_name, black_id, black_name,
-        origin_room, resolve_room, time_control,
+        origin_room, resolve_room,
         result, result_method, moves_uci, moves_san, pgn,
         started_at, ended_at, duration_ms
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
       ) ON CONFLICT (game_id) DO UPDATE SET
         white_id=EXCLUDED.white_id,
         white_name=EXCLUDED.white_name,
@@ -75,7 +75,6 @@ func (r *Repository) SaveResult(ctx context.Context, g *Game, method string) err
         black_name=EXCLUDED.black_name,
         origin_room=EXCLUDED.origin_room,
         resolve_room=EXCLUDED.resolve_room,
-        time_control=EXCLUDED.time_control,
         result=EXCLUDED.result,
         result_method=EXCLUDED.result_method,
         moves_uci=EXCLUDED.moves_uci,
@@ -89,7 +88,7 @@ func (r *Repository) SaveResult(ctx context.Context, g *Game, method string) err
         g.ID,
         g.WhiteID, g.WhiteName,
         g.BlackID, g.BlackName,
-        g.OriginRoom, g.ResolveRoom, g.TimeControl,
+        g.OriginRoom, g.ResolveRoom,
         result, strings.TrimSpace(method), string(movesUCIRaw), string(movesSANRaw), pgn,
         g.CreatedAt, g.UpdatedAt, duration,
     )
@@ -124,9 +123,7 @@ func buildPGN(g *Game, pgnResult, method string) string {
     b.WriteString(fmt.Sprintf("[Date \"%04d.%02d.%02d\"]\n", date.Year(), int(date.Month()), date.Day()))
     b.WriteString(fmt.Sprintf("[White \"%s\"]\n", sanitizePGN(g.WhiteName)))
     b.WriteString(fmt.Sprintf("[Black \"%s\"]\n", sanitizePGN(g.BlackName)))
-    if strings.TrimSpace(g.TimeControl) != "" {
-        b.WriteString(fmt.Sprintf("[TimeControl \"%s\"]\n", sanitizePGN(g.TimeControl)))
-    }
+    // time control removed
     if strings.TrimSpace(method) != "" {
         b.WriteString(fmt.Sprintf("[Termination \"%s\"]\n", sanitizePGN(strings.ToLower(method))))
     }
@@ -153,4 +150,3 @@ func sanitizePGN(s string) string {
     s = strings.ReplaceAll(s, "\"", "'")
     return strings.TrimSpace(s)
 }
-
