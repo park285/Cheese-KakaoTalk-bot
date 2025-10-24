@@ -1,3 +1,32 @@
 .env
 .env.docker
 AGENTS.md
+
+# documentation paths
+docs/
+doc/
+Documentation/
+
+# env files (keep example tracked)
+.env.*
+!.env.example
+
+# local runtime artifacts
+bin/
+logs/
+.run/
+*.log
+*.tmp
+*.pid
+
+# editor/OS noise
+.vscode/
+.idea/
+.DS_Store
+
+# coverage outputs
+coverage.out
+*.coverprofile
+
+# codex/collab tooling
+.codex/
