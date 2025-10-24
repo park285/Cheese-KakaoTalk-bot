@@ -67,3 +67,6 @@ Standalone chess-bot foundation focused on the Iris communication layer.
   - `LOG_TO_CONSOLE` / `LOG_TO_FILE` — default `true` / `true`
   - `LOG_FILE` — default `logs/bot.log`
   - `LOG_CALLER` — default `false` (legacy 모드에서는 자동 활성화)
+
+### 운영 참고
+- Iris 표기가 user로 기록되는 현상: `docs/iris-user-label.md`
