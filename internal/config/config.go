@@ -52,6 +52,12 @@ type AppConfig struct {
     EgressTransport string
     // WS_EGRESS_DRYRUN: true면 WS 페이로드만 로깅(실전 전송 안 함)
     WSEgressDryRun bool
+
+    // PvP 전용 Egress 오버라이드
+    // PVP_EGRESS_TRANSPORT: http|ws|auto (빈 문자열이면 전역 EgressTransport 상속)
+    PvpEgressTransport string
+    // PVP_WS_EGRESS_DRYRUN: PvP WS 드라이런
+    PvpWSEgressDryRun bool
 }
 
 func Load() (*AppConfig, error) {
@@ -186,6 +192,21 @@ func Load() (*AppConfig, error) {
     if v := strings.TrimSpace(os.Getenv("WS_EGRESS_DRYRUN")); v != "" {
         if b, err := strconv.ParseBool(v); err == nil {
             cfg.WSEgressDryRun = b
+        }
+    }
+
+    // PVP_EGRESS_TRANSPORT
+    if v := strings.TrimSpace(os.Getenv("PVP_EGRESS_TRANSPORT")); v != "" {
+        vv := strings.ToLower(v)
+        switch vv {
+        case "http", "ws", "auto":
+            cfg.PvpEgressTransport = vv
+        }
+    }
+    // PVP_WS_EGRESS_DRYRUN
+    if v := strings.TrimSpace(os.Getenv("PVP_WS_EGRESS_DRYRUN")); v != "" {
+        if b, err := strconv.ParseBool(v); err == nil {
+            cfg.PvpWSEgressDryRun = b
         }
     }
 

@@ -30,6 +30,8 @@ import (
 
 // 전역 송신자: http|ws|auto를 캡슐화. main에서 초기화.
 var defaultEgress irisfast.Egress
+var pvpEgress irisfast.Egress
+var pvpPresenter *chesspresenter.Presenter
 
 func main() {
 	if err := obslog.InitFromEnv(); err != nil {
@@ -135,6 +137,17 @@ func main() {
     presenter := chesspresenter.NewPresenter(
         func(room, message string) error { return egress.SendText(context.Background(), room, message) },
         func(room, imageBase64 string) error { return egress.SendImage(context.Background(), room, imageBase64) },
+    )
+
+    // PvP 전용 Egress/Presetner (오버라이드 없으면 전역과 동일)
+    pvpMode := cfg.EgressTransport
+    pvpDry := cfg.WSEgressDryRun
+    if strings.TrimSpace(cfg.PvpEgressTransport) != "" { pvpMode = cfg.PvpEgressTransport }
+    if cfg.PvpWSEgressDryRun { pvpDry = true }
+    pvpEgress = irisfast.NewEgress(pvpMode, pvpDry, client, ws, obslog.L())
+    pvpPresenter = chesspresenter.NewPresenter(
+        func(room, message string) error { return pvpEgress.SendText(context.Background(), room, message) },
+        func(room, imageBase64 string) error { return pvpEgress.SendImage(context.Background(), room, imageBase64) },
     )
 	formatter := chesspresenter.NewFormatter(prefixProvider{prefix: cfg.BotPrefix})
 
@@ -586,9 +599,9 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
             }
             vdto := wDTO
             if strings.TrimSpace(viewer) == strings.TrimSpace(g.BlackID) { vdto = bDTO }
-            // 1) 텍스트 먼저 전송 (개별 에러 로그)
+        // 1) 텍스트 먼저 전송 (개별 에러 로그)
             if strings.TrimSpace(text) != "" {
-                if err := defaultEgress.SendText(context.Background(), r, text); err != nil {
+                if err := pvpEgress.SendText(context.Background(), r, text); err != nil {
                     obslog.L().Warn("pvp_start_text_error", zap.Error(err), zap.String("room_id", r), zap.String("game_id", g.ID))
                 }
             }
@@ -597,7 +610,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
             delay := time.Duration(cfg.StartImageDelayMS) * time.Millisecond
             if delay < 0 { delay = 0 }
             time.Sleep(delay)
-            if err := presenter.Board(r, "", vdto); err != nil {
+            if err := pvpPresenter.Board(r, "", vdto); err != nil {
                 obslog.L().Warn("pvp_board_send_error",
                     zap.Error(err),
                     zap.String("room_id", r),
@@ -606,9 +619,9 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
                 )
                 // 보드 전송 실패 시 보조 안내문 전송
                 if t, e := catalog.Render("board.send.failed", nil); e == nil {
-                    _ = defaultEgress.SendText(context.Background(), r, t)
+                    _ = pvpEgress.SendText(context.Background(), r, t)
                 } else {
-                    _ = defaultEgress.SendText(context.Background(), r, "보드 전송 실패")
+                    _ = pvpEgress.SendText(context.Background(), r, "보드 전송 실패")
                 }
             }
             // 방 간 지연 적용(이미지 드롭 완화)
@@ -734,14 +747,14 @@ if err != nil {
                 		}
                 		vdto := wDTO
                 		if strings.TrimSpace(viewer) == strings.TrimSpace(g.BlackID) { vdto = bDTO }
-                		if err := presenter.Board(r, "", vdto); err != nil {
+                		if err := pvpPresenter.Board(r, "", vdto); err != nil {
                 			obslog.L().Warn("pvp_board_send_error",
                 				zap.Error(err),
                 				zap.String("room_id", r),
                 				zap.String("game_id", g.ID),
                 				zap.String("phase", "status"),
                 			)
-                			if txt, e := catalog.Render("board.send.failed", nil); e == nil { _ = defaultEgress.SendText(ctx, r, txt) } else { _ = defaultEgress.SendText(ctx, r, "보드 전송 실패") }
+                			if txt, e := catalog.Render("board.send.failed", nil); e == nil { _ = pvpEgress.SendText(ctx, r, txt) } else { _ = pvpEgress.SendText(ctx, r, "보드 전송 실패") }
                 		}
                 		// 방 간 지연 적용(이미지 드롭 완화)
                 		if i < len(rooms)-1 {
@@ -816,7 +829,7 @@ if err != nil {
                                     if strings.TrimSpace(msgText) == "" {
                                         if tt, ee := catalog.Render("board.send.failed", nil); ee == nil { msgText = tt } else { msgText = "보드 전송 실패" }
                                     }
-                                    _ = defaultEgress.SendText(ctx, r, msgText)
+                                    _ = pvpEgress.SendText(ctx, r, msgText)
                                     // 방 간 지연 적용(드롭 완화)
                                     if i < len(rooms)-1 {
                                         d := time.Duration(cfg.FanoutImageDelayMS) * time.Millisecond
@@ -827,9 +840,9 @@ if err != nil {
                             }
                             // 여전히 ACTIVE → 실패 안내
                             if t, e := catalog.Render("resign.process.error", nil); e == nil {
-                                _ = defaultEgress.SendText(ctx, roomID, t)
+                                _ = pvpEgress.SendText(ctx, roomID, t)
                             } else {
-                                _ = defaultEgress.SendText(ctx, roomID, "기권 처리 실패")
+                                _ = pvpEgress.SendText(ctx, roomID, "기권 처리 실패")
                             }
                             return
                         }
@@ -889,7 +902,7 @@ if err != nil {
                             if tt, ee := catalog.Render("board.send.failed", nil); ee == nil { msgText = tt } else { msgText = "보드 전송 실패" }
                         }
                     }
-                    if err := defaultEgress.SendText(ctx, r, msgText); err != nil {
+                    if err := pvpEgress.SendText(ctx, r, msgText); err != nil {
                         obslog.L().Warn("pvp_resign_send_error", zap.Error(err), zap.String("room_id", r), zap.String("game_id", g.ID))
                     }
                     // 방 간 지연 적용(드롭 완화)
@@ -1099,7 +1112,7 @@ fallback := strings.TrimSpace(resultText)
         }
         vdto := wDTO
         if strings.TrimSpace(viewer) == strings.TrimSpace(game.BlackID) { vdto = bDTO }
-        if err := presenter.Board(r, moveText, vdto); err != nil {
+        if err := pvpPresenter.Board(r, moveText, vdto); err != nil {
             obslog.L().Warn("pvp_board_send_error", zap.Error(err), zap.String("room_id", r), zap.String("game_id", game.ID))
             txt := moveText
             if strings.TrimSpace(txt) == "" {
@@ -1112,7 +1125,7 @@ fallback := strings.TrimSpace(resultText)
                     txt = "보드 전송 실패"
                 }
             }
-            _ = defaultEgress.SendText(ctx, r, txt)
+            _ = pvpEgress.SendText(ctx, r, txt)
         }
         // 방 간 지연 적용(이미지 드롭 완화)
         if i < len(rooms)-1 {
