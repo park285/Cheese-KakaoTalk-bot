@@ -28,6 +28,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// 전역 송신자: http|ws|auto를 캡슐화. main에서 초기화.
+var defaultEgress irisfast.Egress
+
 func main() {
 	if err := obslog.InitFromEnv(); err != nil {
 		fmt.Fprintf(os.Stderr, "log init error: %v\n", err)
@@ -40,8 +43,8 @@ func main() {
 	}
 
 	// Align with legacy: do not inject custom HTTP headers
-	client := irisfast.NewClient(cfg.IrisBaseURL)
-	ws := irisfast.NewWebSocket(cfg.IrisWSURL, 5, time.Second)
+    client := irisfast.NewClient(cfg.IrisBaseURL)
+    ws := irisfast.NewWebSocket(cfg.IrisWSURL, 5, time.Second)
 	ws.SetLogger(logger)
 	ws.OnStateChange(func(state irisfast.WebSocketState) {
 		logger.Info("ws_state_cb", zap.String("state", state.String()))
@@ -126,10 +129,13 @@ func main() {
 		}
 		deps = d
 	}
-	presenter := chesspresenter.NewPresenter(
-		func(room, message string) error { return client.SendMessage(context.Background(), room, message) },
-		func(room, imageBase64 string) error { return client.SendImage(context.Background(), room, imageBase64) },
-	)
+    // Egress: http|ws|auto (default http). WS dryrun supported.
+    egress := irisfast.NewEgress(cfg.EgressTransport, cfg.WSEgressDryRun, client, ws, obslog.L())
+    defaultEgress = egress
+    presenter := chesspresenter.NewPresenter(
+        func(room, message string) error { return egress.SendText(context.Background(), room, message) },
+        func(room, imageBase64 string) error { return egress.SendImage(context.Background(), room, imageBase64) },
+    )
 	formatter := chesspresenter.NewFormatter(prefixProvider{prefix: cfg.BotPrefix})
 
 	// YAML message catalog (required): no code fallback.
@@ -394,7 +400,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 	prefix := sanitizeText(cfg.BotPrefix)
 	raw := strings.TrimSpace(strings.TrimPrefix(msgText, prefix))
 	if raw == "" {
-		_ = client.SendMessage(context.Background(), extractRoomID(msg), formatter.Help())
+		_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), formatter.Help())
 		return
 	}
 	parts := strings.Fields(raw)
@@ -404,7 +410,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 
 	switch cmd {
 	case "help", "도움":
-		_ = client.SendMessage(context.Background(), extractRoomID(msg), formatter.Help())
+		_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), formatter.Help())
 	case "방":
 		if len(args) >= 1 {
 			sub := strings.ToLower(strings.TrimSpace(args[0]))
@@ -412,7 +418,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 				metas, err := pvpChanMgr.ListLobby(context.Background())
 				if err != nil {
 					if txt, err := catalog.Render("lobby.list.error", nil); err == nil {
-						_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+						_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 					} else {
 						obslog.L().Error("msgcat_render_error", zap.String("key", "lobby.list.error"), zap.Error(err))
 					}
@@ -420,7 +426,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 				}
 				if len(metas) == 0 {
 					if txt, err := catalog.Render("lobby.none", nil); err == nil {
-						_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+						_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 					} else {
 						obslog.L().Error("msgcat_render_error", zap.String("key", "lobby.none"), zap.Error(err))
 					}
@@ -441,13 +447,13 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 					}
 					b.WriteString("\n")
 				}
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), b.String())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), b.String())
 				return
 			} else if sub == "생성" || sub == "만들기" {
 				user := userIDFromMessage(msg)
 				if user == "" {
 					if txt, err := catalog.Render("user.identify.error", nil); err == nil {
-						_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+						_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 					} else {
 						obslog.L().Error("msgcat_render_error", zap.String("key", "user.identify.error"), zap.Error(err))
 					}
@@ -456,7 +462,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 				roomID := extractRoomID(msg)
 				if g, _ := pvpChessMgr.GetActiveGameByUserInRoom(context.Background(), user, roomID); g != nil {
 					if txt, err := catalog.Render("pvp.busy.in_room", nil); err == nil {
-						_ = client.SendMessage(context.Background(), roomID, txt)
+						_ = defaultEgress.SendText(context.Background(), roomID, txt)
 					} else {
 						obslog.L().Error("msgcat_render_error", zap.String("key", "pvp.busy.in_room"), zap.Error(err))
 					}
@@ -466,9 +472,9 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 					meta := svcchess.SessionMeta{SessionID: sessionIDFor(msg), Room: roomID, Sender: senderName(msg)}
 					if st, err := chess.Status(context.Background(), meta); err == nil && st != nil {
 						if txt, e := catalog.Render("pvp.busy.in_room", nil); e == nil {
-							_ = client.SendMessage(context.Background(), roomID, txt)
+							_ = defaultEgress.SendText(context.Background(), roomID, txt)
 						} else {
-							_ = client.SendMessage(context.Background(), roomID, "이미 진행 중인 대국이 있습니다. 종료 후 진행하세요.")
+							_ = defaultEgress.SendText(context.Background(), roomID, "이미 진행 중인 대국이 있습니다. 종료 후 진행하세요.")
 						}
 						return
 					}
@@ -496,7 +502,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 			}
 		}
 		if txt, err := catalog.Render("usage.lobby", map[string]string{"Prefix": cfg.BotPrefix}); err == nil {
-			_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+			_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 		} else {
 			obslog.L().Error("msgcat_render_error", zap.String("key", "usage.lobby"), zap.Error(err))
 		}
@@ -504,7 +510,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 	case "참가", "방참가":
 		if len(args) < 1 {
 			if txt, err := catalog.Render("usage.join", map[string]string{"Prefix": cfg.BotPrefix}); err == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
 				obslog.L().Error("msgcat_render_error", zap.String("key", "usage.join"), zap.Error(err))
 			}
@@ -535,7 +541,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 		jr, err := pvpChanMgr.Join(context.Background(), extractRoomID(msg), code, user, senderName(msg), pvpchan.ColorRandom)
 		if err != nil {
 			if txt, e := catalog.Render("join.error", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
 				obslog.L().Error("msgcat_render_error", zap.String("key", "join.error"), zap.Error(e))
 			}
@@ -582,7 +588,7 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
             if strings.TrimSpace(viewer) == strings.TrimSpace(g.BlackID) { vdto = bDTO }
             // 1) 텍스트 먼저 전송 (개별 에러 로그)
             if strings.TrimSpace(text) != "" {
-                if err := client.SendMessage(context.Background(), r, text); err != nil {
+                if err := defaultEgress.SendText(context.Background(), r, text); err != nil {
                     obslog.L().Warn("pvp_start_text_error", zap.Error(err), zap.String("room_id", r), zap.String("game_id", g.ID))
                 }
             }
@@ -600,9 +606,9 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
                 )
                 // 보드 전송 실패 시 보조 안내문 전송
                 if t, e := catalog.Render("board.send.failed", nil); e == nil {
-                    _ = client.SendMessage(context.Background(), r, t)
+                    _ = defaultEgress.SendText(context.Background(), r, t)
                 } else {
-                    _ = client.SendMessage(context.Background(), r, "보드 전송 실패")
+                    _ = defaultEgress.SendText(context.Background(), r, "보드 전송 실패")
                 }
             }
             // 방 간 지연 적용(이미지 드롭 완화)
@@ -645,18 +651,18 @@ func handleCommand(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 mr, err := pvpChanMgr.Make(context.Background(), roomID, user, senderName(msg), pvpchan.ColorRandom)
 if err != nil {
     if strings.Contains(strings.ToLower(err.Error()), "already has a lobby") {
-        if txt, e := catalog.Render("lobby.make.limit", nil); e == nil { _ = client.SendMessage(context.Background(), extractRoomID(msg), txt) } else { _ = client.SendMessage(context.Background(), extractRoomID(msg), "이미 생성한 대기 방이 있어 새로 만들 수 없습니다.") }
+        if txt, e := catalog.Render("lobby.make.limit", nil); e == nil { _ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt) } else { _ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "이미 생성한 대기 방이 있어 새로 만들 수 없습니다.") }
         return
     }
     if txt, e := catalog.Render("channel.create.error", map[string]string{"Error": err.Error()}); e == nil {
-        _ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+        _ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
     } else {
         obslog.L().Error("msgcat_render_error", zap.String("key", "channel.create.error"), zap.Error(e))
     }
     return
 }
 		if txt, e := catalog.Render("lobby_make.success", map[string]string{"Code": mr.Code, "Prefix": cfg.BotPrefix}); e == nil {
-			_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+			_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 		} else {
 			obslog.L().Error("msgcat_render_error", zap.String("key", "lobby_make.success"), zap.Error(e))
 		}
@@ -694,7 +700,7 @@ if err != nil {
 			}
 			b.WriteString("\n")
 		}
-		_ = client.SendMessage(context.Background(), extractRoomID(msg), b.String())
+		_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), b.String())
 		return
 	case "현황", "보드":
 		// 세션우선 라우팅: PvP → 레거시 → 없음
@@ -735,7 +741,7 @@ if err != nil {
                 				zap.String("game_id", g.ID),
                 				zap.String("phase", "status"),
                 			)
-                			if txt, e := catalog.Render("board.send.failed", nil); e == nil { _ = client.SendMessage(ctx, r, txt) } else { _ = client.SendMessage(ctx, r, "보드 전송 실패") }
+                			if txt, e := catalog.Render("board.send.failed", nil); e == nil { _ = defaultEgress.SendText(ctx, r, txt) } else { _ = defaultEgress.SendText(ctx, r, "보드 전송 실패") }
                 		}
                 		// 방 간 지연 적용(이미지 드롭 완화)
                 		if i < len(rooms)-1 {
@@ -758,9 +764,9 @@ if err != nil {
 		// 3) 둘 다 없으면 안내
 		obslog.L().Info("route_decision", zap.String("cmd", "status"), zap.String("mode", "none"), zap.String("room_id", roomID), zap.String("user", strings.TrimSpace(user)))
 		if txt, err := catalog.Render("no.active.game", nil); err == nil {
-			_ = client.SendMessage(ctx, roomID, txt)
+			_ = defaultEgress.SendText(ctx, roomID, txt)
 		} else {
-			_ = client.SendMessage(ctx, roomID, "활성 대국이 없습니다.")
+			_ = defaultEgress.SendText(ctx, roomID, "활성 대국이 없습니다.")
 		}
 		return
 	case "기권":
@@ -810,7 +816,7 @@ if err != nil {
                                     if strings.TrimSpace(msgText) == "" {
                                         if tt, ee := catalog.Render("board.send.failed", nil); ee == nil { msgText = tt } else { msgText = "보드 전송 실패" }
                                     }
-                                    _ = client.SendMessage(ctx, r, msgText)
+                                    _ = defaultEgress.SendText(ctx, r, msgText)
                                     // 방 간 지연 적용(드롭 완화)
                                     if i < len(rooms)-1 {
                                         d := time.Duration(cfg.FanoutImageDelayMS) * time.Millisecond
@@ -821,9 +827,9 @@ if err != nil {
                             }
                             // 여전히 ACTIVE → 실패 안내
                             if t, e := catalog.Render("resign.process.error", nil); e == nil {
-                                _ = client.SendMessage(ctx, roomID, t)
+                                _ = defaultEgress.SendText(ctx, roomID, t)
                             } else {
-                                _ = client.SendMessage(ctx, roomID, "기권 처리 실패")
+                                _ = defaultEgress.SendText(ctx, roomID, "기권 처리 실패")
                             }
                             return
                         }
@@ -883,7 +889,7 @@ if err != nil {
                             if tt, ee := catalog.Render("board.send.failed", nil); ee == nil { msgText = tt } else { msgText = "보드 전송 실패" }
                         }
                     }
-                    if err := client.SendMessage(ctx, r, msgText); err != nil {
+                    if err := defaultEgress.SendText(ctx, r, msgText); err != nil {
                         obslog.L().Warn("pvp_resign_send_error", zap.Error(err), zap.String("room_id", r), zap.String("game_id", g.ID))
                     }
                     // 방 간 지연 적용(드롭 완화)
@@ -903,9 +909,9 @@ if err != nil {
 				state, rerr := chess.Resign(ctx, meta)
 				if rerr != nil {
 					if txt, e := catalog.Render("resign.failed", map[string]string{"Error": rerr.Error()}); e == nil {
-						_ = client.SendMessage(ctx, roomID, txt)
+						_ = defaultEgress.SendText(ctx, roomID, txt)
 					} else {
-						_ = client.SendMessage(ctx, roomID, "기권 실패: "+rerr.Error())
+						_ = defaultEgress.SendText(ctx, roomID, "기권 실패: "+rerr.Error())
 					}
 					return
 				}
@@ -915,9 +921,9 @@ if err != nil {
 		}
 		obslog.L().Info("route_decision", zap.String("cmd", "resign"), zap.String("mode", "none"), zap.String("room_id", roomID), zap.String("user", strings.TrimSpace(user)))
 		if txt, err := catalog.Render("no.active.game", nil); err == nil {
-			_ = client.SendMessage(ctx, roomID, txt)
+			_ = defaultEgress.SendText(ctx, roomID, txt)
 		} else {
-			_ = client.SendMessage(ctx, roomID, "활성 대국이 없습니다.")
+			_ = defaultEgress.SendText(ctx, roomID, "활성 대국이 없습니다.")
 		}
 		return
 	default:
@@ -941,9 +947,9 @@ if err != nil {
 				summary, perr := chess.Play(ctx, meta, moveInput)
 				if perr != nil {
 					if txt, e := catalog.Render("move.failed_with_error", map[string]string{"Error": perr.Error()}); e == nil {
-						_ = client.SendMessage(ctx, roomID, txt)
+						_ = defaultEgress.SendText(ctx, roomID, txt)
 					} else {
-						_ = client.SendMessage(ctx, roomID, "이동 실패: "+perr.Error())
+						_ = defaultEgress.SendText(ctx, roomID, "이동 실패: "+perr.Error())
 					}
 					return
 				}
@@ -955,9 +961,9 @@ if err != nil {
 		// 3) 둘 다 없으면 안내(세션 없음)
 		obslog.L().Info("route_decision", zap.String("cmd", "move"), zap.String("mode", "none"), zap.String("room_id", roomID), zap.String("user", strings.TrimSpace(userIDFromMessage(msg))))
 		if txt, err := catalog.Render("no.active.game", nil); err == nil {
-			_ = client.SendMessage(ctx, roomID, txt)
+			_ = defaultEgress.SendText(ctx, roomID, txt)
 		} else {
-			_ = client.SendMessage(ctx, roomID, "활성 대국이 없습니다.")
+			_ = defaultEgress.SendText(ctx, roomID, "활성 대국이 없습니다.")
 		}
 		return
 	}
@@ -976,9 +982,9 @@ func handlePvPMove(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 	if userID == "" {
 		if strict {
 			if txt, e := catalog.Render("user.identify.error", nil); e == nil {
-				_ = client.SendMessage(ctx, roomID, txt)
+				_ = defaultEgress.SendText(ctx, roomID, txt)
 			} else {
-				_ = client.SendMessage(ctx, roomID, "사용자 식별 실패")
+				_ = defaultEgress.SendText(ctx, roomID, "사용자 식별 실패")
 			}
 		}
 		return strict
@@ -987,9 +993,9 @@ func handlePvPMove(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 	if moveInput == "" {
 		if strict {
 			if txt, e := catalog.Render("move.bad_input", nil); e == nil {
-				_ = client.SendMessage(ctx, roomID, txt)
+				_ = defaultEgress.SendText(ctx, roomID, txt)
 			} else {
-				_ = client.SendMessage(ctx, roomID, "이동 실패: 잘못된 입력")
+				_ = defaultEgress.SendText(ctx, roomID, "이동 실패: 잘못된 입력")
 			}
 		}
 		return strict
@@ -999,18 +1005,18 @@ func handlePvPMove(client *irisfast.Client, cfg *appcfg.AppConfig, pvpChessMgr *
 	if err != nil {
 		obslog.L().Warn("pvp_lookup_error", zap.Error(err), zap.String("user_id", userID), zap.String("room_id", roomID))
 		if txt, e := catalog.Render("move.state.error", nil); e == nil {
-			_ = client.SendMessage(ctx, roomID, txt)
+			_ = defaultEgress.SendText(ctx, roomID, txt)
 		} else {
-			_ = client.SendMessage(ctx, roomID, "이동 실패: 대국 상태 조회 오류")
+			_ = defaultEgress.SendText(ctx, roomID, "이동 실패: 대국 상태 조회 오류")
 		}
 		return true
 	}
 	if gameInRoom == nil {
 		if strict {
 			if txt, e := catalog.Render("no.active.game", nil); e == nil {
-				_ = client.SendMessage(ctx, roomID, txt)
+				_ = defaultEgress.SendText(ctx, roomID, txt)
 			} else {
-				_ = client.SendMessage(ctx, roomID, "활성 대국이 없습니다.")
+				_ = defaultEgress.SendText(ctx, roomID, "활성 대국이 없습니다.")
 			}
 			return true
 		}
@@ -1052,7 +1058,7 @@ if wErr != nil || bErr != nil {
     if fallback == "" {
         if t, e := catalog.Render("render.board.failed", nil); e == nil { fallback = t } else { fallback = "보드 렌더링 실패" }
     }
-    _ = client.SendMessage(ctx, roomID, fallback)
+    _ = defaultEgress.SendText(ctx, roomID, fallback)
     return true
 }
 
@@ -1106,7 +1112,7 @@ fallback := strings.TrimSpace(resultText)
                     txt = "보드 전송 실패"
                 }
             }
-            _ = client.SendMessage(ctx, r, txt)
+            _ = defaultEgress.SendText(ctx, r, txt)
         }
         // 방 간 지연 적용(이미지 드롭 완화)
         if i < len(rooms)-1 {
@@ -1250,7 +1256,7 @@ func handleChessCommand(client *irisfast.Client, cfg *appcfg.AppConfig, chess *s
 		Sender:    senderName(msg),
 	}
 	if len(args) == 0 {
-		_ = client.SendMessage(context.Background(), extractRoomID(msg), formatter.Help())
+		_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), formatter.Help())
 		return
 	}
 	sub := strings.ToLower(strings.TrimSpace(args[0]))
@@ -1276,9 +1282,9 @@ func handleChessCommand(client *irisfast.Client, cfg *appcfg.AppConfig, chess *s
 		}
 		if err != nil {
 			if txt, e := catalog.Render("chess.start.failed", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "체스 시작 실패: "+err.Error())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "체스 시작 실패: "+err.Error())
 			}
 			return
 		}
@@ -1287,9 +1293,9 @@ func handleChessCommand(client *irisfast.Client, cfg *appcfg.AppConfig, chess *s
 		state, err := chess.Status(ctx, meta)
 		if err != nil {
 			if txt, e := catalog.Render("chess.status.error", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "체스 현황 오류: "+err.Error())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "체스 현황 오류: "+err.Error())
 			}
 			return
 		}
@@ -1298,9 +1304,9 @@ func handleChessCommand(client *irisfast.Client, cfg *appcfg.AppConfig, chess *s
 		state, err := chess.Undo(ctx, meta)
 		if err != nil {
 			if txt, e := catalog.Render("chess.undo.failed", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "무르기 실패: "+err.Error())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "무르기 실패: "+err.Error())
 			}
 			return
 		}
@@ -1309,9 +1315,9 @@ func handleChessCommand(client *irisfast.Client, cfg *appcfg.AppConfig, chess *s
 		state, err := chess.Resign(ctx, meta)
 		if err != nil {
 			if txt, e := catalog.Render("resign.failed", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "기권 실패: "+err.Error())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "기권 실패: "+err.Error())
 			}
 			return
 		}
@@ -1332,83 +1338,83 @@ func handleChessCommand(client *irisfast.Client, cfg *appcfg.AppConfig, chess *s
 			}
 			return
 		}
-		_ = client.SendMessage(context.Background(), extractRoomID(msg), formatter.History(chesspresenter.ToDTOGames(games)))
+		_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), formatter.History(chesspresenter.ToDTOGames(games)))
 	case "기보":
 		if len(args) < 2 {
 			if txt, e := catalog.Render("usage.game", map[string]string{"Prefix": cfg.BotPrefix}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "용법: "+cfg.BotPrefix+" 기보 <ID>")
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "용법: "+cfg.BotPrefix+" 기보 <ID>")
 			}
 			return
 		}
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil {
 			if txt, e := catalog.Render("game.id.invalid", nil); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "잘못된 ID")
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "잘못된 ID")
 			}
 			return
 		}
 		game, err := chess.Game(ctx, meta, id)
 		if err != nil {
 			if txt, e := catalog.Render("game.fetch.error", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "기보 조회 실패: "+err.Error())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "기보 조회 실패: "+err.Error())
 			}
 			return
 		}
-		_ = client.SendMessage(context.Background(), extractRoomID(msg), formatter.Game(chesspresenter.ToDTOGame(game)))
+		_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), formatter.Game(chesspresenter.ToDTOGame(game)))
 	case "프로필":
 		profile, err := chess.Profile(ctx, meta)
 		if err != nil {
 			if txt, e := catalog.Render("chess.profile.error", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "프로필 조회 실패: "+err.Error())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "프로필 조회 실패: "+err.Error())
 			}
 			return
 		}
-		_ = client.SendMessage(context.Background(), extractRoomID(msg), formatter.Profile(chesspresenterAdaptProfile(profile)))
+		_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), formatter.Profile(chesspresenterAdaptProfile(profile)))
 	case "선호":
 		if len(args) < 2 {
 			if txt, e := catalog.Render("usage.preset", map[string]string{"Prefix": cfg.BotPrefix}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "용법: "+cfg.BotPrefix+" 선호 <preset>")
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "용법: "+cfg.BotPrefix+" 선호 <preset>")
 			}
 			return
 		}
 		profile, err := chess.UpdatePreferredPreset(ctx, meta, args[1])
 		if err != nil {
 			if txt, e := catalog.Render("chess.preset.update.failed", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "선호 난이도 업데이트 실패: "+err.Error())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "선호 난이도 업데이트 실패: "+err.Error())
 			}
 			return
 		}
-		_ = client.SendMessage(context.Background(), extractRoomID(msg), formatter.PreferredPresetUpdated(chesspresenterAdaptProfile(profile)))
+		_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), formatter.PreferredPresetUpdated(chesspresenterAdaptProfile(profile)))
 	case "도움":
 		suggestion, err := chess.Assist(ctx, meta)
 		if err != nil {
 			if txt, e := catalog.Render("chess.assist.failed", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "추천 수 계산 실패: "+err.Error())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "추천 수 계산 실패: "+err.Error())
 			}
 			return
 		}
-		_ = client.SendMessage(context.Background(), extractRoomID(msg), formatter.Assist(chesspresenterAdaptAssist(suggestion)))
+		_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), formatter.Assist(chesspresenterAdaptAssist(suggestion)))
 	default:
 		summary, err := chess.Play(ctx, meta, sub)
 		if err != nil {
 			if txt, e := catalog.Render("move.failed_with_error", map[string]string{"Error": err.Error()}); e == nil {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), txt)
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), txt)
 			} else {
-				_ = client.SendMessage(context.Background(), extractRoomID(msg), "이동 실패: "+err.Error())
+				_ = defaultEgress.SendText(context.Background(), extractRoomID(msg), "이동 실패: "+err.Error())
 			}
 			return
 		}

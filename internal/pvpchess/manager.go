@@ -552,7 +552,7 @@ func parseRedisURL(raw string) (*redis.Options, error) {
     db := 0
     if p := strings.TrimPrefix(u.Path, "/"); p != "" { if n, err := strconv.Atoi(p); err == nil { db = n } }
     pass, _ := u.User.Password()
-    return &redis.Options{Addr: u.Host, Password: pass, DB: db}, nil
+    return &redis.Options{Addr: u.Host, Password: pass, DB: db, Protocol: 2}, nil
 }
 
 // ParseRedisURLForChan returns address, password, and db extracted from REDIS_URL.

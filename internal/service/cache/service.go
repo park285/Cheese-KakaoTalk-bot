@@ -29,16 +29,17 @@ type CacheConfig struct {
 }
 
 func NewCacheService(cfg CacheConfig, logger *zap.Logger) (*CacheService, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Password:     cfg.Password,
-		DB:           cfg.DB,
-		MaxRetries:   3,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
-		PoolSize:     10,
-	})
+    client := redis.NewClient(&redis.Options{
+        Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+        Password:     cfg.Password,
+        DB:           cfg.DB,
+        Protocol:     2,
+        MaxRetries:   3,
+        DialTimeout:  5 * time.Second,
+        ReadTimeout:  3 * time.Second,
+        WriteTimeout: 3 * time.Second,
+        PoolSize:     10,
+    })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

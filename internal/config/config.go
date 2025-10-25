@@ -46,6 +46,12 @@ type AppConfig struct {
     // FANOUT_IMAGE_DELAY_MS: 방 간 전송 간격(ms) — 이미지 드롭 완화용
     // 기본 200ms
     FanoutImageDelayMS int
+
+    // EGRESS 설정: 송신 경로 선택 및 옵션
+    // EGRESS_TRANSPORT: http|ws|auto (기본 http)
+    EgressTransport string
+    // WS_EGRESS_DRYRUN: true면 WS 페이로드만 로깅(실전 전송 안 함)
+    WSEgressDryRun bool
 }
 
 func Load() (*AppConfig, error) {
@@ -57,6 +63,7 @@ func Load() (*AppConfig, error) {
         ChessHistoryLimit:   10,
         StartImageDelayMS:   150,
         FanoutImageDelayMS:  200,
+        EgressTransport:     "http",
     }
 
 	cfg.IrisBaseURL = strings.TrimSpace(os.Getenv("IRIS_BASE_URL"))
@@ -164,6 +171,21 @@ func Load() (*AppConfig, error) {
     if v := strings.TrimSpace(os.Getenv("FANOUT_IMAGE_DELAY_MS")); v != "" {
         if n, err := strconv.Atoi(v); err == nil && n >= 0 {
             cfg.FanoutImageDelayMS = n
+        }
+    }
+
+    // EGRESS_TRANSPORT
+    if v := strings.TrimSpace(os.Getenv("EGRESS_TRANSPORT")); v != "" {
+        vv := strings.ToLower(v)
+        switch vv {
+        case "http", "ws", "auto":
+            cfg.EgressTransport = vv
+        }
+    }
+    // WS_EGRESS_DRYRUN
+    if v := strings.TrimSpace(os.Getenv("WS_EGRESS_DRYRUN")); v != "" {
+        if b, err := strconv.ParseBool(v); err == nil {
+            cfg.WSEgressDryRun = b
         }
     }
 
