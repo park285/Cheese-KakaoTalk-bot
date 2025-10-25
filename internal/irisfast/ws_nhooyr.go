@@ -1,29 +1,29 @@
 package irisfast
 
 import (
-    "context"
-    "net/http"
-    "strings"
-    "sync"
-    "time"
+	"context"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
 
-    "go.uber.org/zap"
-    "nhooyr.io/websocket"
-    "nhooyr.io/websocket/wsjson"
+	"go.uber.org/zap"
+	"nhooyr.io/websocket"
+	"nhooyr.io/websocket/wsjson"
 )
 
 type callbackEntry struct {
-    id       int
-    callback MessageCallback
+	id       int
+	callback MessageCallback
 }
 
 type stateCallbackEntry struct {
-    id       int
-    callback StateCallback
+	id       int
+	callback StateCallback
 }
 
 type WebSocket struct {
-    wsURL string
+	wsURL string
 
 	conn   *websocket.Conn
 	state  WebSocketState
@@ -46,11 +46,11 @@ type WebSocket struct {
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
 
-    // optional: inject headers at handshake (e.g., X-User-*)
-    headerProvider HeaderProvider
+	// optional: inject headers at handshake (e.g., X-User-*)
+	headerProvider HeaderProvider
 
-    // logger: zap (default Nop)
-    logger *zap.Logger
+	// logger: zap (default Nop)
+	logger *zap.Logger
 }
 
 func NewWebSocket(wsURL string, maxReconnectAttempts int, reconnectDelay time.Duration) *WebSocket {
@@ -63,7 +63,7 @@ func NewWebSocket(wsURL string, maxReconnectAttempts int, reconnectDelay time.Du
 		stopCh:               make(chan struct{}),
 		msgCbs:               make([]callbackEntry, 0),
 		stateCbs:             make([]stateCallbackEntry, 0),
-            logger:               zap.NewNop(),
+		logger:               zap.NewNop(),
 	}
 }
 
@@ -81,16 +81,18 @@ func (ws *WebSocket) Connect(ctx context.Context) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-    conn, _, err := websocket.Dial(dialCtx, ws.wsURL, &websocket.DialOptions{
-        CompressionMode: websocket.CompressionNoContextTakeover,
-        HTTPHeader:       ws.buildHeaders(),
-    })
-    if err != nil {
-        ws.setState(WSStateFailed)
-        ws.scheduleReconnect()
-        if ws.logger != nil { ws.logger.Error("ws_connect_failed", zap.Error(err), zap.String("url", ws.wsURL)) }
-        return err
-    }
+	conn, _, err := websocket.Dial(dialCtx, ws.wsURL, &websocket.DialOptions{
+		CompressionMode: websocket.CompressionNoContextTakeover,
+		HTTPHeader:      ws.buildHeaders(),
+	})
+	if err != nil {
+		ws.setState(WSStateFailed)
+		ws.scheduleReconnect()
+		if ws.logger != nil {
+			ws.logger.Error("ws_connect_failed", zap.Error(err), zap.String("url", ws.wsURL))
+		}
+		return err
+	}
 
 	ws.conn = conn
 	ws.reconnectAttempts = 0
@@ -115,16 +117,18 @@ func (ws *WebSocket) listen() {
 			return
 		}
 		var msg Message
-        if err := wsjson.Read(ws.rootCtx, ws.conn, &msg); err != nil {
-            if ws.isStopping() {
-                return
-            }
-            ws.setState(WSStateDisconnected)
-            _ = ws.closeConn(websocket.StatusGoingAway, "reconnect")
-            ws.scheduleReconnect()
-            if ws.logger != nil { ws.logger.Warn("ws_listen_error", zap.Error(err)) }
-            return
-        }
+		if err := wsjson.Read(ws.rootCtx, ws.conn, &msg); err != nil {
+			if ws.isStopping() {
+				return
+			}
+			ws.setState(WSStateDisconnected)
+			_ = ws.closeConn(websocket.StatusGoingAway, "reconnect")
+			ws.scheduleReconnect()
+			if ws.logger != nil {
+				ws.logger.Warn("ws_listen_error", zap.Error(err))
+			}
+			return
+		}
 
 		ws.cbM.RLock()
 		callbacks := make([]callbackEntry, len(ws.msgCbs))
@@ -139,39 +143,41 @@ func (ws *WebSocket) listen() {
 }
 
 func (ws *WebSocket) pingLoop() {
-    defer ws.wg.Done()
-    t := time.NewTicker(ws.pingInterval)
-    defer t.Stop()
-    consecutivePingFailures := 0
-    for {
-        select {
-        case <-ws.stopCh:
-            return
-        case <-t.C:
-            if ws.conn == nil {
-                continue
-            }
-            ctx, cancel := context.WithTimeout(ws.rootCtx, 3*time.Second)
-            err := ws.conn.Ping(ctx)
-            cancel()
-            if err != nil {
-                consecutivePingFailures++
-                if consecutivePingFailures >= 2 {
-                    if ws.isStopping() {
-                        return
-                    }
-                    ws.setState(WSStateDisconnected)
-                    _ = ws.closeConn(websocket.StatusGoingAway, "ping failure")
-                    ws.scheduleReconnect()
-                    if ws.logger != nil { ws.logger.Warn("ws_ping_failure", zap.Int("failures", consecutivePingFailures), zap.Error(err)) }
-                    consecutivePingFailures = 0
-                }
-                continue
-            }
-            // success
-            consecutivePingFailures = 0
-        }
-    }
+	defer ws.wg.Done()
+	t := time.NewTicker(ws.pingInterval)
+	defer t.Stop()
+	consecutivePingFailures := 0
+	for {
+		select {
+		case <-ws.stopCh:
+			return
+		case <-t.C:
+			if ws.conn == nil {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(ws.rootCtx, 3*time.Second)
+			err := ws.conn.Ping(ctx)
+			cancel()
+			if err != nil {
+				consecutivePingFailures++
+				if consecutivePingFailures >= 2 {
+					if ws.isStopping() {
+						return
+					}
+					ws.setState(WSStateDisconnected)
+					_ = ws.closeConn(websocket.StatusGoingAway, "ping failure")
+					ws.scheduleReconnect()
+					if ws.logger != nil {
+						ws.logger.Warn("ws_ping_failure", zap.Int("failures", consecutivePingFailures), zap.Error(err))
+					}
+					consecutivePingFailures = 0
+				}
+				continue
+			}
+			// success
+			consecutivePingFailures = 0
+		}
+	}
 }
 
 func (ws *WebSocket) scheduleReconnect() {
@@ -180,39 +186,51 @@ func (ws *WebSocket) scheduleReconnect() {
 	}
 	ws.setState(WSStateReconnecting)
 
-    go func() {
-        for attempt := 1; attempt <= ws.maxReconnectAttempts; attempt++ {
-            select {
-            case <-ws.stopCh:
-                return
-            case <-time.After(backoffDuration(attempt)):
-            }
-            backoff := backoffDuration(attempt)
-            if ws.logger != nil { ws.logger.Info("ws_reconnect_attempt", zap.Int("attempt", attempt), zap.Duration("backoff", backoff)) }
-            dialCtx, cancel := context.WithTimeout(ws.rootCtx, 10*time.Second)
-            conn, _, err := websocket.Dial(dialCtx, ws.wsURL, &websocket.DialOptions{
-                CompressionMode: websocket.CompressionNoContextTakeover,
-                HTTPHeader:       ws.buildHeaders(),
-            })
-            cancel()
-            if err != nil {
-                if ws.logger != nil { ws.logger.Warn("ws_reconnect_failed", zap.Int("attempt", attempt), zap.Error(err)) }
-                continue
-            }
+	go func() {
+		for attempt := 1; attempt <= ws.maxReconnectAttempts; attempt++ {
+			d := backoffDuration(attempt)
+			if ws.reconnectDelay > 0 {
+				d += ws.reconnectDelay
+			}
+			select {
+			case <-ws.stopCh:
+				return
+			case <-time.After(d):
+			}
+			backoff := d
+			if ws.logger != nil {
+				ws.logger.Info("ws_reconnect_attempt", zap.Int("attempt", attempt), zap.Duration("backoff", backoff))
+			}
+			dialCtx, cancel := context.WithTimeout(ws.rootCtx, 10*time.Second)
+			conn, _, err := websocket.Dial(dialCtx, ws.wsURL, &websocket.DialOptions{
+				CompressionMode: websocket.CompressionNoContextTakeover,
+				HTTPHeader:      ws.buildHeaders(),
+			})
+			cancel()
+			if err != nil {
+				if ws.logger != nil {
+					ws.logger.Warn("ws_reconnect_failed", zap.Int("attempt", attempt), zap.Error(err))
+				}
+				continue
+			}
 
-            ws.conn = conn
-            ws.reconnectAttempts = 0
-            ws.setState(WSStateConnected)
-            if ws.logger != nil { ws.logger.Info("ws_reconnected", zap.Int("attempt", attempt)) }
+			ws.conn = conn
+			ws.reconnectAttempts = 0
+			ws.setState(WSStateConnected)
+			if ws.logger != nil {
+				ws.logger.Info("ws_reconnected", zap.Int("attempt", attempt))
+			}
 
-            ws.wg.Add(2)
-            go ws.listen()
-            go ws.pingLoop()
-            return
-        }
-        ws.setState(WSStateFailed)
-        if ws.logger != nil { ws.logger.Error("ws_reconnect_exhausted", zap.Int("max_attempts", ws.maxReconnectAttempts)) }
-    }()
+			ws.wg.Add(2)
+			go ws.listen()
+			go ws.pingLoop()
+			return
+		}
+		ws.setState(WSStateFailed)
+		if ws.logger != nil {
+			ws.logger.Error("ws_reconnect_exhausted", zap.Int("max_attempts", ws.maxReconnectAttempts))
+		}
+	}()
 }
 
 func (ws *WebSocket) OnMessage(cb MessageCallback) int {
@@ -254,11 +272,13 @@ func (ws *WebSocket) RemoveStateCallback(id int) {
 }
 
 func (ws *WebSocket) setState(state WebSocketState) {
-    ws.stateM.Lock()
-    ws.state = state
-    ws.stateM.Unlock()
+	ws.stateM.Lock()
+	ws.state = state
+	ws.stateM.Unlock()
 
-    if ws.logger != nil { ws.logger.Info("ws_state", zap.String("state", state.String())) }
+	if ws.logger != nil {
+		ws.logger.Info("ws_state", zap.String("state", state.String()))
+	}
 
 	ws.cbM.RLock()
 	callbacks := make([]stateCallbackEntry, len(ws.stateCbs))
@@ -293,46 +313,44 @@ func (ws *WebSocket) Close(ctx context.Context) error {
 }
 
 func (ws *WebSocket) closeConn(code websocket.StatusCode, reason string) error {
-    if ws.conn == nil {
-        return nil
-    }
-    defer func() { ws.conn = nil }()
-    return ws.conn.Close(code, reason)
+	if ws.conn == nil {
+		return nil
+	}
+	defer func() { ws.conn = nil }()
+	return ws.conn.Close(code, reason)
 }
 
 func (ws *WebSocket) isStopping() bool {
-    select {
-    case <-ws.stopCh:
-        return true
-    default:
-        return false
-    }
+	select {
+	case <-ws.stopCh:
+		return true
+	default:
+		return false
+	}
 }
 
-// SetHeaderProvider allows injecting headers into the WS handshake.
 func (ws *WebSocket) SetHeaderProvider(h HeaderProvider) {
-    ws.headerProvider = h
+	ws.headerProvider = h
 }
 
 func (ws *WebSocket) buildHeaders() http.Header {
-    hdr := http.Header{}
-    if ws.headerProvider == nil {
-        return hdr
-    }
-    for k, v := range ws.headerProvider() {
-        if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
-            continue
-        }
-        hdr.Set(k, v)
-    }
-    return hdr
+	hdr := http.Header{}
+	if ws.headerProvider == nil {
+		return hdr
+	}
+	for k, v := range ws.headerProvider() {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			continue
+		}
+		hdr.Set(k, v)
+	}
+	return hdr
 }
 
-// SetLogger는 zap 로거를 주입한다. nil이면 Nop으로 대체.
 func (ws *WebSocket) SetLogger(l *zap.Logger) {
-    if l == nil {
-        ws.logger = zap.NewNop()
-        return
-    }
-    ws.logger = l
+	if l == nil {
+		ws.logger = zap.NewNop()
+		return
+	}
+	ws.logger = l
 }

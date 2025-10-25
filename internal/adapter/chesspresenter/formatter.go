@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/park285/Cheese-KakaoTalk-bot/internal/msgcat"
 	"github.com/park285/Cheese-KakaoTalk-bot/internal/util"
 	"github.com/park285/Cheese-KakaoTalk-bot/pkg/chessdto"
 )
@@ -17,6 +18,36 @@ const (
 	defaultPreset        = "level3"
 	materialScoreNeutral = 39
 	capturedRecentLimit  = 3
+
+	chessSeeMoreInstructionFallback = "전체보기를 눌러주세요"
+	chessSeeMoreInstructionSuffix   = ""
+
+	chessHelpTemplate = "%s\n" +
+		"• %s 방 생성\n" +
+		"  PvP 채널 생성 및 코드 발급\n" +
+		"• %s 방 리스트\n" +
+		"  대기 중인 PvP 방 목록(초대 코드 확인)\n" +
+		"• %s 참가 <코드>\n" +
+		"  코드로 PvP 방 참가\n" +
+		"• %s 보드 | 현황\n" +
+		"  현재 PvP 대국 보드/현황 표시\n" +
+		"• %s 기권\n" +
+		"  PvP 대국에서 기권\n" +
+		"\n" +
+		"• %s 시작 [난이도]\n" +
+		"  새 게임 시작 (난이도: level1~level8)\n" +
+		"• %s <수> (예: e2e4)\n" +
+		"  SAN/UCI 모두 입력 가능\n" +
+		"• %s 기권\n" +
+		"  즉시 기권하고 세션 종료\n" +
+		"• %s 무르기\n" +
+		"  마지막 한 수(플레이어+봇) 되돌리기\n" +
+		"• %s 기록 [n]\n" +
+		"  최근 기보 확인 (기본 10개)\n" +
+		"• %s 기보 <ID>\n" +
+		"  특정 기보 상세 보기\n" +
+		"• %s 프로필\n" +
+		"  개인 승률·레이팅 확인"
 )
 
 // PrefixProvider exposes the Prefix that Kakao messages should use.
@@ -27,6 +58,7 @@ type PrefixProvider interface {
 // Formatter renders chess DTOs into Kakao-friendly text blocks.
 type Formatter struct {
 	prefixProvider PrefixProvider
+	catalog        *msgcat.Catalog
 }
 
 func NewFormatter(provider PrefixProvider) *Formatter {
@@ -40,14 +72,55 @@ func (f *Formatter) Prefix() string {
 	return strings.TrimSpace(f.prefixProvider.Prefix())
 }
 
-func (f *Formatter) Start(state *chessdto.SessionState, resumed bool) string {
-    if state == nil {
-        if resumed {
-            return fmt.Sprintf("진행 중인 체스 게임 정보를 불러오지 못했습니다. `%s 현황` 명령으로 다시 확인해주세요.", f.Prefix())
-        }
-        return fmt.Sprintf("체스 게임을 시작할 수 없습니다. `%s 시작`을 다시 시도해주세요.", f.Prefix())
-    }
+// SetCatalog sets a per-formatter message catalog (optional).
+func (f *Formatter) SetCatalog(cat *msgcat.Catalog) { f.catalog = cat }
 
+// defaultCatalog is used when a formatter doesn't have a catalog assigned.
+var defaultCatalog *msgcat.Catalog
+
+// SetCatalog sets the package-level default catalog for all formatters.
+func SetCatalog(cat *msgcat.Catalog) { defaultCatalog = cat }
+
+func (f *Formatter) Start(state *chessdto.SessionState, resumed bool) string {
+	prefix := f.Prefix()
+	if state == nil {
+		if resumed {
+			return fmt.Sprintf("진행 중인 체스 게임 정보를 불러오지 못했습니다. `%s 현황` 명령으로 다시 확인해주세요.", prefix)
+		}
+		return fmt.Sprintf("체스 게임을 시작할 수 없습니다. `%s 시작`을 다시 시도해주세요.", prefix)
+	}
+	// Build profile lines exactly as before for layout preservation
+	var ratingLine, recordLine string
+	if profile := state.Profile; profile != nil {
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("• 레이팅: %d", profile.Rating))
+		if delta := state.RatingDelta; delta > 0 {
+			b.WriteString(fmt.Sprintf(" (▲%d)", delta))
+		} else if delta < 0 {
+			b.WriteString(fmt.Sprintf(" (▼%d)", -delta))
+		}
+		ratingLine = b.String()
+		b.Reset()
+		b.WriteString(fmt.Sprintf("• 전적: %d승 %d패 %d무 (%d판)", profile.Wins, profile.Losses, profile.Draws, profile.GamesPlayed))
+		if profile.PreferredPreset != "" {
+			b.WriteString(fmt.Sprintf(" | 선호: %s", formatPreset(profile.PreferredPreset)))
+		}
+		recordLine = b.String()
+	}
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
+	}
+	if body, err := cat.Render("formatter.start.body", map[string]any{
+		"Resumed":           resumed,
+		"Preset":            formatPreset(state.Preset),
+		"ProfileRatingLine": ratingLine,
+		"ProfileRecordLine": recordLine,
+		"Prefix":            prefix,
+	}); err == nil && strings.TrimSpace(body) != "" {
+		return body
+	}
+	// Fallback to original logic if catalog rendering fails
 	var sb strings.Builder
 	if resumed {
 		sb.WriteString("♞ 진행 중인 체스 게임을 불러왔습니다.\n")
@@ -55,28 +128,15 @@ func (f *Formatter) Start(state *chessdto.SessionState, resumed bool) string {
 		sb.WriteString("♟️ 체스 게임을 시작했습니다.\n")
 	}
 	sb.WriteString(fmt.Sprintf("• 난이도: %s\n", formatPreset(state.Preset)))
-	if profile := state.Profile; profile != nil {
-		sb.WriteString(fmt.Sprintf("• 레이팅: %d", profile.Rating))
-		if delta := state.RatingDelta; delta > 0 {
-			sb.WriteString(fmt.Sprintf(" (▲%d)", delta))
-		} else if delta < 0 {
-			sb.WriteString(fmt.Sprintf(" (▼%d)", -delta))
-		}
-		sb.WriteString("\n")
-		sb.WriteString(fmt.Sprintf("• 전적: %d승 %d패 %d무 (%d판)", profile.Wins, profile.Losses, profile.Draws, profile.GamesPlayed))
-		if profile.PreferredPreset != "" {
-			sb.WriteString(fmt.Sprintf(" | 선호: %s", formatPreset(profile.PreferredPreset)))
-		}
-		sb.WriteString("\n")
+	if ratingLine != "" {
+		sb.WriteString(ratingLine + "\n")
 	}
-	prefix := f.Prefix()
-	sb.WriteString("• 플레이어는 백으로 시작합니다.\n")
-    sb.WriteString("\n이동 방법: `")
-    sb.WriteString(prefix)
-    sb.WriteString(" <수>` .\n")
-    sb.WriteString("무르기 기능: `")
-    sb.WriteString(prefix)
-    sb.WriteString(" 무르기`.\n")
+	if recordLine != "" {
+		sb.WriteString(recordLine + "\n")
+	}
+	sb.WriteString("• 플레이어는 백으로 시작합니다.\n\n")
+	sb.WriteString("이동 방법: `" + prefix + " <수>`.\n")
+	sb.WriteString("무르기 기능: `" + prefix + " 무르기`.\n")
 	sb.WriteString("난이도 선택: level1~level8.")
 	return sb.String()
 }
@@ -90,7 +150,7 @@ func (f *Formatter) Assist(suggestion *chessdto.AssistSuggestion) string {
 	if move == "" {
 		return "엔진이 추천 수를 제공하지 못했습니다."
 	}
-    return f.Prefix() + " " + move
+	return f.Prefix() + " " + move
 }
 
 func (f *Formatter) Move(summary *chessdto.MoveSummary) string {
@@ -100,32 +160,56 @@ func (f *Formatter) Move(summary *chessdto.MoveSummary) string {
 	if !summary.Finished {
 		return ""
 	}
-
 	state := summary.State
-	var sb strings.Builder
-	sb.WriteString(formatOutcome(state.Outcome, state.OutcomeMeta))
-	sb.WriteString("\n\n")
-	sb.WriteString(fmt.Sprintf("• 난이도: %s\n", formatPreset(state.Preset)))
-
+	outcomeText := formatOutcome(state.Outcome, state.OutcomeMeta)
+	preset := formatPreset(state.Preset)
+	var ratingLine, recordLine, gameIDLine string
 	if profile := summary.Profile; profile != nil {
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("• 현재 레이팅: %d", profile.Rating))
 		delta := summary.RatingDelta
-		sb.WriteString(fmt.Sprintf("• 현재 레이팅: %d", profile.Rating))
 		if delta > 0 {
-			sb.WriteString(fmt.Sprintf(" (▲%d)", delta))
+			b.WriteString(fmt.Sprintf(" (▲%d)", delta))
 		} else if delta < 0 {
-			sb.WriteString(fmt.Sprintf(" (▼%d)", -delta))
+			b.WriteString(fmt.Sprintf(" (▼%d)", -delta))
 		} else if profile.GamesPlayed > 0 {
-			sb.WriteString(" (변동 없음)")
+			b.WriteString(" (변동 없음)")
 		}
-		sb.WriteString("\n")
-		sb.WriteString(fmt.Sprintf("• 누적 전적: %d승 %d패 %d무 (%d판)\n", profile.Wins, profile.Losses, profile.Draws, profile.GamesPlayed))
-		sb.WriteString("\n")
+		ratingLine = b.String()
+		b.Reset()
+		b.WriteString(fmt.Sprintf("• 누적 전적: %d승 %d패 %d무 (%d판)", profile.Wins, profile.Losses, profile.Draws, profile.GamesPlayed))
+		recordLine = b.String()
+	}
+	if summary.GameID > 0 {
+		gameIDLine = fmt.Sprintf("기보 ID: #%d", summary.GameID)
+	}
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
+	}
+	if body, err := cat.Render("formatter.move.body", map[string]any{
+		"OutcomeText": outcomeText,
+		"Preset":      preset,
+		"RatingLine":  ratingLine,
+		"RecordLine":  recordLine,
+		"GameIDLine":  gameIDLine,
+	}); err == nil && strings.TrimSpace(body) != "" {
+		return body
+	}
+	// fallback
+	var sb strings.Builder
+	sb.WriteString(outcomeText + "\n\n")
+	sb.WriteString("• 난이도: " + preset + "\n")
+	if ratingLine != "" {
+		sb.WriteString(ratingLine + "\n")
+	}
+	if recordLine != "" {
+		sb.WriteString(recordLine + "\n\n")
 	} else {
 		sb.WriteString("\n")
 	}
-
-	if summary.GameID > 0 {
-		sb.WriteString(fmt.Sprintf("기보 ID: #%d\n", summary.GameID))
+	if gameIDLine != "" {
+		sb.WriteString(gameIDLine + "\n")
 	}
 	return sb.String()
 }
@@ -134,76 +218,113 @@ func (f *Formatter) Status(state *chessdto.SessionState) string {
 	if state == nil {
 		return f.Help()
 	}
+	prefix := f.Prefix()
+	preset := formatPreset(state.Preset)
+	recentLine := ""
+	if len(state.MovesSAN) > 0 {
+		recentLine = "• 최근 " + formatRecentMoves(state.MovesSAN)
+	}
+	profileInfo := formatProfileSummary(state.Profile, state.RatingDelta)
+	// material/captured lines
+	var b strings.Builder
+	appendMaterialLine(&b, state.Material)
+	materialLine := strings.TrimSuffix(b.String(), "\n")
+	b.Reset()
+	appendCapturedLine(&b, state.Captured)
+	capturedLine := strings.TrimSuffix(b.String(), "\n")
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
+	}
+	if body, err := cat.Render("formatter.status.body", map[string]any{
+		"Preset":       preset,
+		"MoveCount":    state.MoveCount,
+		"RecentLine":   recentLine,
+		"ProfileInfo":  strings.TrimSpace(profileInfo),
+		"MaterialLine": strings.TrimSpace(materialLine),
+		"CapturedLine": strings.TrimSpace(capturedLine),
+		"Prefix":       prefix,
+	}); err == nil && strings.TrimSpace(body) != "" {
+		return body
+	}
+	// fallback to original composition
 	var sb strings.Builder
 	sb.WriteString("♞ 체스 현황\n")
-	sb.WriteString(fmt.Sprintf("• 난이도 %s\n", formatPreset(state.Preset)))
+	sb.WriteString("• 난이도 " + preset + "\n")
 	sb.WriteString(fmt.Sprintf("• 진행 %d수\n", state.MoveCount))
-	if len(state.MovesSAN) > 0 {
-		sb.WriteString(fmt.Sprintf("• 최근 %s\n", formatRecentMoves(state.MovesSAN)))
+	if recentLine != "" {
+		sb.WriteString(recentLine + "\n")
 	}
-	if info := formatProfileSummary(state.Profile, state.RatingDelta); info != "" {
-		sb.WriteString(info)
+	if profileInfo != "" {
+		sb.WriteString(profileInfo)
 	}
-	appendMaterialLine(&sb, state.Material)
-	appendCapturedLine(&sb, state.Captured)
-
-	prefix := f.Prefix()
-    sb.WriteString("\n명령: `")
-    sb.WriteString(prefix)
-    sb.WriteString(" <수>` (SAN/UCI)\n기권: `")
-    sb.WriteString(prefix)
-    sb.WriteString(" 기권`\n무르기: `")
-    sb.WriteString(prefix)
-    sb.WriteString(" 무르기`.")
+	if materialLine != "" {
+		sb.WriteString(materialLine + "\n")
+	}
+	if capturedLine != "" {
+		sb.WriteString(capturedLine + "\n")
+	}
+	sb.WriteString("\n명령: `" + prefix + " <수>` (SAN/UCI)\n기권: `" + prefix + " 기권`\n무르기: `" + prefix + " 무르기`.")
 	return sb.String()
 }
 
 func (f *Formatter) Resign(state *chessdto.SessionState) string {
+	outcome := ""
+	profileInfo := ""
+	if state != nil {
+		outcome = formatOutcome(state.Outcome, state.OutcomeMeta)
+		profileInfo = formatProfileSummary(state.Profile, state.RatingDelta)
+	}
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
+	}
+	if body, err := cat.Render("formatter.resign.body", map[string]any{
+		"OutcomeText": outcome,
+		"ProfileInfo": strings.TrimSpace(profileInfo),
+	}); err == nil && strings.TrimSpace(body) != "" {
+		return body
+	}
+	// fallback
 	var sb strings.Builder
 	sb.WriteString("🏳️ 기권 처리되었습니다.\n")
-	if state == nil {
+	if outcome == "" {
 		sb.WriteString("🛑 기권하여 패배로 기록되었습니다.")
-		return sb.String()
+	} else {
+		sb.WriteString(outcome)
 	}
-	sb.WriteString(formatOutcome(state.Outcome, state.OutcomeMeta))
-	if profile := state.Profile; profile != nil {
-		sb.WriteString("\n")
-		sb.WriteString(fmt.Sprintf("• 레이팅: %d", profile.Rating))
-		if delta := state.RatingDelta; delta > 0 {
-			sb.WriteString(fmt.Sprintf(" (▲%d)", delta))
-		} else if delta < 0 {
-			sb.WriteString(fmt.Sprintf(" (▼%d)", -delta))
-		}
-		sb.WriteString("\n")
-		sb.WriteString(fmt.Sprintf("• 전적: %d승 %d패 %d무 (%d판)", profile.Wins, profile.Losses, profile.Draws, profile.GamesPlayed))
+	if strings.TrimSpace(profileInfo) != "" {
+		sb.WriteString("\n" + profileInfo)
 	}
 	return sb.String()
 }
 
 func (f *Formatter) Help() string {
-    content := fmt.Sprintf(`%s
-• %s 시작 [난이도]
-  새 게임 시작 (난이도: level1~level8)
-• %s <수> (예: e2e4)
-  SAN/UCI 모두 입력 가능
-• %s 기권
-  즉시 기권하고 세션 종료
-• %s 무르기
-  마지막 한 수(플레이어+봇) 되돌리기
-• %s 기록 [n]
-  최근 기보 확인 (기본 10개)
-• %s 기보 <ID>
-  특정 기보 상세 보기
-• %s 프로필
-  개인 승률·레이팅 확인`, chessHelpInstruction,
-        f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix(), f.Prefix())
-
-    return util.ApplyKakaoSeeMorePadding(stripChessHeader(content, chessHelpInstruction), chessHelpInstruction)
+	// YAML-only: must come from catalog. No hardcoded fallback.
+	prefix := f.Prefix()
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
+	}
+	body, err := cat.Render("help.korean", map[string]string{"Prefix": prefix})
+	if err != nil {
+		return ""
+	}
+	return util.ApplySeeMoreWithHeader(body, chessHelpInstruction, chessSeeMoreInstructionFallback, chessSeeMoreInstructionSuffix)
 }
 
 func (f *Formatter) History(games []*chessdto.ChessGame) string {
 	var sb strings.Builder
-	sb.WriteString(chessHistoryInstruction)
+	// header from YAML
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
+	}
+	header := chessHistoryInstruction
+	if h, err := cat.Render("formatter.history.header", nil); err == nil && strings.TrimSpace(h) != "" {
+		header = h
+	}
+	sb.WriteString(header)
 	sb.WriteByte('\n')
 	for _, game := range games {
 		dateText := formatShortTime(game.EndedAt)
@@ -218,13 +339,18 @@ func (f *Formatter) History(games []*chessdto.ChessGame) string {
 			sb.WriteString(fmt.Sprintf("  소요 시간: %s\n", durationText))
 		}
 	}
-    sb.WriteString(fmt.Sprintf("\n자세히 보려면 `%s 기보 <ID>` 명령을 사용하세요.", f.Prefix()))
+	prefix := f.Prefix()
+	if ft, err := cat.Render("formatter.history.footer", map[string]string{"Prefix": prefix}); err == nil && strings.TrimSpace(ft) != "" {
+		sb.WriteString(ft)
+	} else {
+		sb.WriteString(fmt.Sprintf("\n자세히 보려면 `%s 기보 <ID>` 명령을 사용하세요.", prefix))
+	}
 
 	content := sb.String()
 	if strings.TrimSpace(content) == "" {
 		return content
 	}
-	return util.ApplyKakaoSeeMorePadding(stripChessHeader(content, chessHistoryInstruction), chessHistoryInstruction)
+	return util.ApplySeeMoreWithHeader(content, header, chessSeeMoreInstructionFallback, chessSeeMoreInstructionSuffix)
 }
 
 func (f *Formatter) Game(game *chessdto.ChessGame) string {
@@ -263,7 +389,15 @@ func (f *Formatter) Profile(profile *chessdto.ChessProfile) string {
 		return "저장된 체스 프로필이 없습니다."
 	}
 	var sb strings.Builder
-	sb.WriteString(chessProfileInstruction)
+	header := chessProfileInstruction
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
+	}
+	if h, err := cat.Render("formatter.profile.header", nil); err == nil && strings.TrimSpace(h) != "" {
+		header = h
+	}
+	sb.WriteString(header)
 	sb.WriteString("\n")
 	if info := formatProfileSummary(profile, 0); info != "" {
 		sb.WriteString(info)
@@ -274,26 +408,40 @@ func (f *Formatter) Profile(profile *chessdto.ChessProfile) string {
 	if !profile.LastPlayedAt.IsZero() {
 		sb.WriteString(fmt.Sprintf("• 마지막 경기: %s\n", formatShortTime(profile.LastPlayedAt)))
 	}
-    prefix := f.Prefix()
-    sb.WriteString(fmt.Sprintf("\n새 게임: `%s 시작`, 기록: `%s 기록`, 기보 상세: `%s 기보 <ID>`", prefix, prefix, prefix))
+	prefix := f.Prefix()
+	sb.WriteString(fmt.Sprintf("\n새 게임: `%s 시작`, 기록: `%s 기록`, 기보 상세: `%s 기보 <ID>`", prefix, prefix, prefix))
 
 	content := sb.String()
 	if !strings.HasPrefix(content, chessProfileInstruction) {
 		return content
 	}
-	return util.ApplyKakaoSeeMorePadding(stripChessHeader(content, chessProfileInstruction), chessProfileInstruction)
+	return util.ApplySeeMoreWithHeader(content, header, chessSeeMoreInstructionFallback, chessSeeMoreInstructionSuffix)
 }
 
 func (f *Formatter) PreferredPresetUpdated(profile *chessdto.ChessProfile) string {
 	if profile == nil {
 		return "선호 난이도를 업데이트하지 못했습니다. 잠시 후 다시 시도해주세요."
 	}
+	prefix := f.Prefix()
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
+	}
+	body, err := cat.Render("formatter.preferred_updated.body", map[string]any{
+		"PreferredPreset": formatPreset(profile.PreferredPreset),
+		"ProfileInfo":     strings.TrimSpace(formatProfileSummary(profile, 0)),
+		"Prefix":          prefix,
+	})
+	if err == nil && strings.TrimSpace(body) != "" {
+		return body
+	}
+	// fallback
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("✅ 선호 난이도를 %s로 설정했습니다.\n", formatPreset(profile.PreferredPreset)))
 	if info := formatProfileSummary(profile, 0); info != "" {
 		sb.WriteString(info)
 	}
-    sb.WriteString(fmt.Sprintf("새 게임 시작: `%s 시작`", f.Prefix()))
+	sb.WriteString(fmt.Sprintf("새 게임 시작: `%s 시작`", prefix))
 	return sb.String()
 }
 
@@ -301,45 +449,57 @@ func (f *Formatter) Undo(state *chessdto.SessionState) string {
 	if state == nil {
 		return "무르기 결과를 불러오지 못했습니다."
 	}
+	prefix := f.Prefix()
+	// profile/material/captured
+	profileInfo := strings.TrimSpace(formatProfileSummary(state.Profile, 0))
+	var b strings.Builder
+	appendMaterialLine(&b, state.Material)
+	materialLine := strings.TrimSuffix(b.String(), "\n")
+	b.Reset()
+	appendCapturedLine(&b, state.Captured)
+	capturedLine := strings.TrimSuffix(b.String(), "\n")
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
+	}
+	if body, err := cat.Render("formatter.undo.body", map[string]any{
+		"Preset":       formatPreset(state.Preset),
+		"MoveCount":    state.MoveCount,
+		"ProfileInfo":  profileInfo,
+		"MaterialLine": strings.TrimSpace(materialLine),
+		"CapturedLine": strings.TrimSpace(capturedLine),
+		"Prefix":       prefix,
+	}); err == nil && strings.TrimSpace(body) != "" {
+		return body
+	}
+	// fallback
 	var sb strings.Builder
 	sb.WriteString("↩️ 마지막 한 수를 되돌렸습니다.\n")
-	sb.WriteString(fmt.Sprintf("• 난이도: %s\n", formatPreset(state.Preset)))
+	sb.WriteString("• 난이도: " + formatPreset(state.Preset) + "\n")
 	sb.WriteString(fmt.Sprintf("• 현재 진행 수: %d\n", state.MoveCount))
-	if info := formatProfileSummary(state.Profile, 0); info != "" {
-		sb.WriteString(info)
+	if profileInfo != "" {
+		sb.WriteString(profileInfo)
 	}
-	appendMaterialLine(&sb, state.Material)
-	appendCapturedLine(&sb, state.Captured)
-    sb.WriteString("\n이제 다시 당신의 턴입니다. `")
-    sb.WriteString(f.Prefix())
-    sb.WriteString(" <수>` 형식으로 새 수를 입력하세요.")
-    sb.WriteString(fmt.Sprintf("\n최근 기록은 `%s 기록`으로 확인할 수 있습니다.", f.Prefix()))
+	if materialLine != "" {
+		sb.WriteString(materialLine + "\n")
+	}
+	if capturedLine != "" {
+		sb.WriteString(capturedLine + "\n")
+	}
+	sb.WriteString("\n이제 다시 당신의 턴입니다. `" + prefix + " <수>` 형식으로 새 수를 입력하세요.")
+	sb.WriteString("\n최근 기록은 `" + prefix + " 기록`으로 확인할 수 있습니다.")
 	return sb.String()
 }
 
 func (f *Formatter) NoSession() string {
-    return fmt.Sprintf("진행 중인 체스 게임이 없습니다. `%s 시작`으로 새 게임을 시작하세요.", f.Prefix())
-}
-
-func stripChessHeader(text, header string) string {
-	if strings.TrimSpace(text) == "" {
-		return text
+	cat := f.catalog
+	if cat == nil {
+		cat = defaultCatalog
 	}
-
-	candidates := []string{
-		header + "\r\n\r\n",
-		header + "\n\n",
-		header + "\r\n",
-		header + "\n",
-		header,
+	if body, err := cat.Render("formatter.no_session.body", map[string]string{"Prefix": f.Prefix()}); err == nil && strings.TrimSpace(body) != "" {
+		return body
 	}
-
-	for _, candidate := range candidates {
-		if strings.HasPrefix(text, candidate) {
-			return strings.TrimPrefix(text, candidate)
-		}
-	}
-	return text
+	return fmt.Sprintf("진행 중인 체스 게임이 없습니다. `%s 시작`으로 새 게임을 시작하세요.", f.Prefix())
 }
 
 func formatPreset(preset string) string {

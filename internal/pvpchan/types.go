@@ -59,6 +59,8 @@ var (
     ErrFull          = errf("channel already has two participants")
     // 플레이어가 동일 방에서 이미 진행 중인 대국이 있는 경우
     ErrPlayerBusyInRoom = errf("player has active game in this room")
+    // 동일 사용자가 동시에 2개 이상 대기방 생성 불가
+    ErrCreatorHasLobby = errf("user already has a lobby")
 )
 
 type staticErr string

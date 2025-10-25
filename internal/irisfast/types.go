@@ -37,8 +37,8 @@ type Message struct {
 type MessageJSON struct {
     UserID    string `json:"user_id,omitempty"`
     Message   string `json:"message,omitempty"`
-    ChatID    string `json:"chat_id,omitempty"`
     RoomID    string `json:"room_id,omitempty"`
+    ChatID    string `json:"chat_id,omitempty"`
     Type      string `json:"type,omitempty"`
     CreatedAt string `json:"created_at,omitempty"`
 }

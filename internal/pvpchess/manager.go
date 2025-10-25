@@ -2,6 +2,7 @@ package pvpchess
 
 import (
     "context"
+    "errors"
     "crypto/rand"
     "encoding/hex"
     "encoding/json"
@@ -152,61 +153,108 @@ func (m *Manager) PlayMove(ctx context.Context, userID, moveStr string) (*Game, 
     g, err := m.GetActiveGameByUser(ctx, userID)
     if err != nil || g == nil { return nil, "", err }
 
-    // ensure it's player's turn
-    playerColor := m.playerColor(g, userID)
-    if playerColor == "" { return nil, "", fmt.Errorf("user not in game") }
-    if (g.Turn == White && playerColor != "white") || (g.Turn == Black && playerColor != "black") {
-        return g, "지금은 상대 차례입니다.", nil
-    }
+    // optimistic concurrency control using WATCH on game key
+    gameK := gameKey(g.ID)
+    oldLen := len(g.MovesUCI)
 
-    // reconstruct game from fen+moves
-    game := reconstruct(g.FEN, g.MovesUCI)
-    if game == nil { return nil, "", fmt.Errorf("failed to reconstruct game") }
+    var resultText string
+    // sentinels for flow control
+    var (
+        errNotYourTurn = errors.New("not_your_turn")
+        errIllegalMove = errors.New("illegal_move")
+    )
 
-    pos := game.Position()
-    raw := strings.TrimSpace(moveStr)
-    uci := strings.ToLower(raw)
-    if uci == "" { return g, "잘못된 수 입력입니다.", nil }
-
-    // try UCI first
-    notationUCI := nchess.UCINotation{}
-    if mv, derr := notationUCI.Decode(pos, uci); derr == nil {
-        game.Move(mv, nil)
-        // capture SAN from the played move
-        san := nchess.AlgebraicNotation{}.Encode(pos, mv)
-        g.MovesUCI = append(g.MovesUCI, uci)
-        g.MovesSAN = append(g.MovesSAN, san)
-    } else {
-        // fallback SAN
-        if err := game.PushNotationMove(raw, nchess.AlgebraicNotation{}, nil); err != nil {
-            return g, "유효하지 않은 수입니다.", nil
+    err = m.rdb.Watch(ctx, func(tx *redis.Tx) error {
+        raw, err := tx.Get(ctx, gameK).Bytes()
+        if err == redis.Nil {
+            return fmt.Errorf("game not found")
         }
-        // derive both SAN and UCI from last move
-        last := lastMove(game)
-        if last == nil { return g, "유효하지 않은 수입니다.", nil }
-        g.MovesSAN = append(g.MovesSAN, nchess.AlgebraicNotation{}.Encode(pos, last))
-        g.MovesUCI = append(g.MovesUCI, last.String())
+        if err != nil { return err }
+        var cur Game
+        if jerr := json.Unmarshal(raw, &cur); jerr != nil { return jerr }
+        if cur.Status != StatusActive { return redis.TxFailedErr }
+        // Ensure no concurrent move applied
+        if len(cur.MovesUCI) != oldLen { return redis.TxFailedErr }
+
+        // validate turn
+        playerColor := m.playerColor(&cur, userID)
+        if playerColor == "" { return fmt.Errorf("user not in game") }
+        if (cur.Turn == White && playerColor != "white") || (cur.Turn == Black && playerColor != "black") {
+            return errNotYourTurn
+        }
+
+        // reconstruct and apply move
+        game := reconstruct(cur.FEN, cur.MovesUCI)
+        if game == nil { return fmt.Errorf("failed to reconstruct game") }
+        pos := game.Position()
+        rawMove := strings.TrimSpace(moveStr)
+        uci := strings.ToLower(rawMove)
+        if uci == "" { resultText = "잘못된 수 입력입니다."; return errIllegalMove }
+
+        notationUCI := nchess.UCINotation{}
+        if mv, derr := notationUCI.Decode(pos, uci); derr == nil {
+            game.Move(mv, nil)
+            san := nchess.AlgebraicNotation{}.Encode(pos, mv)
+            cur.MovesUCI = append(cur.MovesUCI, uci)
+            cur.MovesSAN = append(cur.MovesSAN, san)
+        } else {
+            if err := game.PushNotationMove(rawMove, nchess.AlgebraicNotation{}, nil); err != nil {
+                resultText = "유효하지 않은 수입니다."
+                return errIllegalMove
+            }
+            last := lastMove(game)
+            if last == nil { resultText = "유효하지 않은 수입니다."; return errIllegalMove }
+            cur.MovesSAN = append(cur.MovesSAN, nchess.AlgebraicNotation{}.Encode(pos, last))
+            cur.MovesUCI = append(cur.MovesUCI, last.String())
+        }
+
+        cur.FEN = game.FEN()
+        cur.Turn = colorFrom(game.Position().Turn())
+        cur.UpdatedAt = time.Now()
+
+        switch game.Outcome() {
+        case nchess.WhiteWon:
+            cur.Status = StatusFinished
+            cur.Winner = cur.WhiteID
+            cur.Outcome = "white"
+        case nchess.BlackWon:
+            cur.Status = StatusFinished
+            cur.Winner = cur.BlackID
+            cur.Outcome = "black"
+        case nchess.Draw:
+            cur.Status = StatusDraw
+            cur.Outcome = "draw"
+        }
+
+        // persist atomically
+        pipe := tx.TxPipeline()
+        newRaw, _ := json.Marshal(&cur)
+        pipe.Set(ctx, gameK, newRaw, 24*time.Hour)
+        if _, err := pipe.Exec(ctx); err != nil { return err }
+
+        // publish result to outer scope
+        g = &cur
+        who := g.WhiteName
+        if playerColor == "black" { who = g.BlackName }
+        resultText = fmt.Sprintf("%s: %s", who, strings.TrimSpace(moveStr))
+        return nil
+    }, gameK)
+
+    if err != nil {
+        if errors.Is(err, redis.TxFailedErr) {
+            // concurrent update detected
+            return g, "동시 명령이 감지되어 처리되지 않았습니다. 다시 시도해주세요.", nil
+        }
+        if err.Error() == "illegal_move" || errors.Is(err, errors.New("illegal_move")) { // fallback check
+            if strings.TrimSpace(resultText) == "" { resultText = "유효하지 않은 수입니다." }
+            return g, resultText, nil
+        }
+        if err.Error() == "not_your_turn" || errors.Is(err, errors.New("not_your_turn")) {
+            return g, "지금은 상대 차례입니다.", nil
+        }
+        return nil, "", err
     }
 
-    g.FEN = game.FEN()
-    g.Turn = colorFrom(game.Position().Turn())
-    g.UpdatedAt = time.Now()
-
-    switch game.Outcome() {
-    case nchess.WhiteWon:
-        g.Status = StatusFinished
-        g.Winner = g.WhiteID
-        g.Outcome = "white"
-    case nchess.BlackWon:
-        g.Status = StatusFinished
-        g.Winner = g.BlackID
-        g.Outcome = "black"
-    case nchess.Draw:
-        g.Status = StatusDraw
-        g.Outcome = "draw"
-    }
-
-    if err := m.save(ctx, g); err != nil { return nil, "", err }
     obslog.L().Info("pvp_move",
         zap.String("game_id", g.ID),
         zap.String("user_id", strings.TrimSpace(userID)),
@@ -222,22 +270,200 @@ func (m *Manager) PlayMove(ctx context.Context, userID, moveStr string) (*Game, 
         _ = m.persistIfFinal(ctx, g, "draw")
     }
 
-    who := g.WhiteName
-    if playerColor == "black" { who = g.BlackName }
-    return g, fmt.Sprintf("%s: %s", who, strings.TrimSpace(moveStr)), nil
+    return g, resultText, nil
+}
+
+// PlayMoveByRoom applies a move but restricts target selection to the user's ACTIVE game in the given room.
+// 왜: 동일 사용자가 여러 방에서 PvP를 동시 진행할 때 현재 방 외 게임에 수가 적용되는 문제를 방지.
+func (m *Manager) PlayMoveByRoom(ctx context.Context, userID, roomID, moveStr string) (*Game, string, error) {
+    if strings.TrimSpace(userID) == "" || strings.TrimSpace(roomID) == "" {
+        return nil, "", fmt.Errorf("invalid parameters")
+    }
+    g, err := m.GetActiveGameByUserInRoom(ctx, userID, roomID)
+    if err != nil || g == nil { return nil, "", err }
+
+    gameK := gameKey(g.ID)
+    oldLen := len(g.MovesUCI)
+    var resultText string
+    var (
+        errNotYourTurn = errors.New("not_your_turn")
+        errIllegalMove = errors.New("illegal_move")
+    )
+    err = m.rdb.Watch(ctx, func(tx *redis.Tx) error {
+        raw, err := tx.Get(ctx, gameK).Bytes()
+        if err == redis.Nil { return fmt.Errorf("game not found") }
+        if err != nil { return err }
+        var cur Game
+        if jerr := json.Unmarshal(raw, &cur); jerr != nil { return jerr }
+        if cur.Status != StatusActive { return redis.TxFailedErr }
+        if len(cur.MovesUCI) != oldLen { return redis.TxFailedErr }
+        // 스코프 확인: 여전히 같은 방이어야 함
+        if !(strings.TrimSpace(cur.OriginRoom) == strings.TrimSpace(roomID) || strings.TrimSpace(cur.ResolveRoom) == strings.TrimSpace(roomID)) {
+            return fmt.Errorf("game not in room")
+        }
+        // 턴 검증
+        playerColor := m.playerColor(&cur, userID)
+        if playerColor == "" { return fmt.Errorf("user not in game") }
+        if (cur.Turn == White && playerColor != "white") || (cur.Turn == Black && playerColor != "black") {
+            return errNotYourTurn
+        }
+        // 재구성 + 적용
+        game := reconstruct(cur.FEN, cur.MovesUCI)
+        if game == nil { return fmt.Errorf("failed to reconstruct game") }
+        pos := game.Position()
+        rawMove := strings.TrimSpace(moveStr)
+        uci := strings.ToLower(rawMove)
+        if uci == "" { resultText = "잘못된 수 입력입니다."; return errIllegalMove }
+        notationUCI := nchess.UCINotation{}
+        if mv, derr := notationUCI.Decode(pos, uci); derr == nil {
+            game.Move(mv, nil)
+            san := nchess.AlgebraicNotation{}.Encode(pos, mv)
+            cur.MovesUCI = append(cur.MovesUCI, uci)
+            cur.MovesSAN = append(cur.MovesSAN, san)
+        } else {
+            if err := game.PushNotationMove(rawMove, nchess.AlgebraicNotation{}, nil); err != nil {
+                resultText = "유효하지 않은 수입니다."
+                return errIllegalMove
+            }
+            last := lastMove(game)
+            if last == nil { resultText = "유효하지 않은 수입니다."; return errIllegalMove }
+            cur.MovesSAN = append(cur.MovesSAN, nchess.AlgebraicNotation{}.Encode(pos, last))
+            cur.MovesUCI = append(cur.MovesUCI, last.String())
+        }
+        cur.FEN = game.FEN()
+        cur.Turn = colorFrom(game.Position().Turn())
+        cur.UpdatedAt = time.Now()
+        switch game.Outcome() {
+        case nchess.WhiteWon:
+            cur.Status = StatusFinished
+            cur.Winner = cur.WhiteID
+            cur.Outcome = "white"
+        case nchess.BlackWon:
+            cur.Status = StatusFinished
+            cur.Winner = cur.BlackID
+            cur.Outcome = "black"
+        case nchess.Draw:
+            cur.Status = StatusDraw
+            cur.Outcome = "draw"
+        }
+        pipe := tx.TxPipeline()
+        newRaw, _ := json.Marshal(&cur)
+        pipe.Set(ctx, gameK, newRaw, 24*time.Hour)
+        if _, err := pipe.Exec(ctx); err != nil { return err }
+        g = &cur
+        who := g.WhiteName
+        if m.playerColor(g, userID) == "black" { who = g.BlackName }
+        resultText = fmt.Sprintf("%s: %s", who, strings.TrimSpace(moveStr))
+        return nil
+    }, gameK)
+    if err != nil {
+        if errors.Is(err, redis.TxFailedErr) {
+            return g, "동시 명령이 감지되어 처리되지 않았습니다. 다시 시도해주세요.", nil
+        }
+        if err.Error() == "illegal_move" || errors.Is(err, errors.New("illegal_move")) {
+            if strings.TrimSpace(resultText) == "" { resultText = "유효하지 않은 수입니다." }
+            return g, resultText, nil
+        }
+        if err.Error() == "not_your_turn" || errors.Is(err, errors.New("not_your_turn")) {
+            return g, "지금은 상대 차례입니다.", nil
+        }
+        return nil, "", err
+    }
+    obslog.L().Info("pvp_move_by_room",
+        zap.String("game_id", g.ID),
+        zap.String("room_id", strings.TrimSpace(roomID)),
+        zap.String("user_id", strings.TrimSpace(userID)),
+        zap.String("turn", func() string { if g.Turn == White { return "white" }; return "black" }()),
+        zap.String("last_uci", func() string { if n := len(g.MovesUCI); n > 0 { return g.MovesUCI[n-1] }; return "" }()),
+        zap.String("status", string(g.Status)),
+        zap.String("outcome", g.Outcome),
+    )
+    if g.Status == StatusFinished {
+        _ = m.persistIfFinal(ctx, g, "checkmate")
+    } else if g.Status == StatusDraw {
+        _ = m.persistIfFinal(ctx, g, "draw")
+    }
+    return g, resultText, nil
 }
 
 func (m *Manager) Resign(ctx context.Context, userID string) (*Game, string, error) {
     g, err := m.GetActiveGameByUser(ctx, userID)
     if err != nil || g == nil { return nil, "", err }
-    g.Status = StatusResigned
-    g.Winner = opponentID(g, userID)
-    g.Outcome = "resign"
-    g.UpdatedAt = time.Now()
-    if err := m.save(ctx, g); err != nil { return nil, "", err }
+    gameK := gameKey(g.ID)
+    err = m.rdb.Watch(ctx, func(tx *redis.Tx) error {
+        raw, err := tx.Get(ctx, gameK).Bytes()
+        if err == redis.Nil { return fmt.Errorf("game not found") }
+        if err != nil { return err }
+        var cur Game
+        if jerr := json.Unmarshal(raw, &cur); jerr != nil { return jerr }
+        if cur.Status != StatusActive { return redis.TxFailedErr }
+        cur.Status = StatusResigned
+        cur.Winner = opponentID(&cur, userID)
+        cur.Outcome = "resign"
+        cur.UpdatedAt = time.Now()
+        pipe := tx.TxPipeline()
+        newRaw, _ := json.Marshal(&cur)
+        pipe.Set(ctx, gameK, newRaw, 24*time.Hour)
+        if _, err := pipe.Exec(ctx); err != nil { return err }
+        g = &cur
+        return nil
+    }, gameK)
+    if err != nil {
+        if errors.Is(err, redis.TxFailedErr) {
+            return nil, "", fmt.Errorf("game no longer active")
+        }
+        return nil, "", err
+    }
     obslog.L().Info("pvp_resign",
         zap.String("game_id", g.ID),
         zap.String("resigner", strings.TrimSpace(userID)),
+        zap.String("winner", g.Winner),
+    )
+    _ = m.persistIfFinal(ctx, g, "resignation")
+    return g, "기권", nil
+}
+
+// ResignByRoom resigns the active game for a user limited to a specific room scope.
+// 방 스코프 모호성 제거: 같은 유저가 여러 방에서 동시 PvP를 진행하더라도 정확히 해당 방의 게임만 기권 처리.
+func (m *Manager) ResignByRoom(ctx context.Context, userID, roomID string) (*Game, string, error) {
+    if strings.TrimSpace(userID) == "" || strings.TrimSpace(roomID) == "" {
+        return nil, "", fmt.Errorf("invalid parameters")
+    }
+    g, err := m.GetActiveGameByUserInRoom(ctx, userID, roomID)
+    if err != nil || g == nil { return nil, "", err }
+    gameK := gameKey(g.ID)
+    err = m.rdb.Watch(ctx, func(tx *redis.Tx) error {
+        raw, err := tx.Get(ctx, gameK).Bytes()
+        if err == redis.Nil { return fmt.Errorf("game not found") }
+        if err != nil { return err }
+        var cur Game
+        if jerr := json.Unmarshal(raw, &cur); jerr != nil { return jerr }
+        if cur.Status != StatusActive { return redis.TxFailedErr }
+        // ensure room scope still matches
+        if !(cur.OriginRoom == roomID || cur.ResolveRoom == roomID) {
+            return fmt.Errorf("game not in room")
+        }
+        cur.Status = StatusResigned
+        cur.Winner = opponentID(&cur, userID)
+        cur.Outcome = "resign"
+        cur.UpdatedAt = time.Now()
+        pipe := tx.TxPipeline()
+        newRaw, _ := json.Marshal(&cur)
+        pipe.Set(ctx, gameK, newRaw, 24*time.Hour)
+        if _, err := pipe.Exec(ctx); err != nil { return err }
+        g = &cur
+        return nil
+    }, gameK)
+    if err != nil {
+        if errors.Is(err, redis.TxFailedErr) {
+            return nil, "", fmt.Errorf("game no longer active")
+        }
+        return nil, "", err
+    }
+    obslog.L().Info("pvp_resign_by_room",
+        zap.String("game_id", g.ID),
+        zap.String("resigner", strings.TrimSpace(userID)),
+        zap.String("room_id", strings.TrimSpace(roomID)),
         zap.String("winner", g.Winner),
     )
     _ = m.persistIfFinal(ctx, g, "resignation")
@@ -296,12 +522,22 @@ func (m *Manager) get(ctx context.Context, id string) (*Game, error) {
     return &g, nil
 }
 
+// LoadGame returns the game by ID. 공개 래퍼(get) — 호출자는 상태 확인용으로 사용.
+func (m *Manager) LoadGame(ctx context.Context, id string) (*Game, error) {
+    return m.get(ctx, id)
+}
+
 func (m *Manager) indexParticipants(ctx context.Context, id string, white, black string) error {
     if strings.TrimSpace(white) != "" {
-        if err := m.rdb.SAdd(ctx, idxUserKey(white), id).Err(); err != nil { return err }
+        key := idxUserKey(white)
+        if err := m.rdb.SAdd(ctx, key, id).Err(); err != nil { return err }
+        // 인덱스 키 TTL도 갱신하여 누적 방지(게임 TTL과 동일)
+        _ = m.rdb.Expire(ctx, key, 24*time.Hour).Err()
     }
     if strings.TrimSpace(black) != "" {
-        if err := m.rdb.SAdd(ctx, idxUserKey(black), id).Err(); err != nil { return err }
+        key := idxUserKey(black)
+        if err := m.rdb.SAdd(ctx, key, id).Err(); err != nil { return err }
+        _ = m.rdb.Expire(ctx, key, 24*time.Hour).Err()
     }
     return nil
 }

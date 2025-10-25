@@ -1,0 +1,209 @@
+pvp:
+  resign:
+    announce: "🛑 {{.ResignerName}} 님이 기권했습니다. 승자: {{.WinnerName}}"
+    winner: "✅ 상대가 기권했습니다. 승리하였습니다."
+    loser: "🛑 기권하여 패배하였습니다."
+  already:
+    finished: "이미 종료된 대국입니다."
+  busy:
+    in_room: "이미 진행 중인 대국이 있습니다. 종료 후 진행하세요."
+  start:
+    announce: "♟️ 대국 시작 — {{.WhiteName}} vs {{.BlackName}}"
+  no_active_game: "활성 PvP 대국이 없습니다."
+
+help:
+  korean: |
+     {{.Prefix}} 방 생성
+      PvP 채널 생성 및 코드 발급
+     {{.Prefix}} 방 리스트
+      대기방 목록(초대 코드 확인)
+     {{.Prefix}} 참가 <코드>
+      코드로 PvP 방 참가
+     {{.Prefix}} 보드 | 현황 | <수> | 기권
+     {{.Prefix}} 시작 [level1~level8]
+      싱글 체스 시작 / 명령: <수>, 무르기, 기권, 현황, 기록, 기보, 프로필
+
+# --- Added keys: command-layer short messages (layout preserved) ---
+lobby:
+  list:
+    error: "방 목록 조회 실패"
+    header: "대기방:"
+    item: "• 코드: {{.Code}} | 만든이: {{.CreatorName}}"
+  none: "대기방이 없습니다."
+  make:
+    limit: "이미 생성한 대기 방이 있어 새로 만들 수 없습니다."
+
+user:
+  identify:
+    error: "사용자 식별 실패"
+
+
+
+channel:
+  create:
+    error: "채널 생성 실패: {{.Error}}"
+
+usage:
+  lobby: "사용방법: {{.Prefix}} 방 생성 | {{.Prefix}} 방 리스트"
+  join: "사용방법: {{.Prefix}} 참가 <코드>"
+  game: "사용방법: {{.Prefix}} 기보 <ID>"
+  preset: "사용방법: {{.Prefix}} 선호 <preset>"
+
+join:
+  error: "참가 실패: {{.Error}}"
+  waiting: "참가 완료. 상대를 기다리는 중…"
+
+board:
+  send:
+    failed: "보드 전송 실패"
+
+render:
+  error: "표시 오류"
+  board:
+    failed: "보드 렌더링 실패"
+
+game:
+  not_found: "대국 정보를 찾을 수 없습니다."
+  id:
+    invalid: "잘못된 ID"
+  fetch:
+    error: "기보 조회 실패: {{.Error}}"
+
+no:
+  active:
+    game: "활성 대국이 없습니다."
+
+finish:
+  checkmate: "✅ 승리했습니다! 축하드립니다.{{if .Winner}} (승자: {{.Winner}}){{end}}"
+  resign: "🛑 기권하여 패배로 기록되었습니다.{{if .Winner}} (승자: {{.Winner}}){{end}}"
+  draw: "🤝 무승부로 종료되었습니다."
+
+resign:
+  process:
+    error: "기권 처리 실패"
+  failed: "기권 실패: {{.Error}}"
+
+move:
+  failed: "이동 실패"
+  failed_with_error: "이동 실패: {{.Error}}"
+  bad_input: "이동 실패: 잘못된 입력"
+  state:
+    error: "이동 실패: 대국 상태 조회 오류"
+
+chess:
+  start:
+    failed: "체스 시작 실패: {{.Error}}"
+  status:
+    error: "체스 현황 오류: {{.Error}}"
+  undo:
+    failed: "무르기 실패: {{.Error}}"
+  history:
+    error: "기록 조회 실패: {{.Error}}"
+  profile:
+    error: "프로필 조회 실패: {{.Error}}"
+  preset:
+    update:
+      failed: "선호 난이도 업데이트 실패: {{.Error}}"
+  assist:
+    failed: "추천 수 계산 실패: {{.Error}}"
+
+lobby_make:
+  success: "대기방이 생성 되었습니다.\n채널 코드: {{.Code}}"
+
+# --- Formatter templates (layout preserving) ---
+formatter:
+  start:
+    body: |
+      {{- if .Resumed -}}♞ 진행 중인 체스 게임을 불러왔습니다.
+      {{- else -}}♟️ 체스 게임을 시작했습니다.
+      {{- end }}
+      • 난이도: {{.Preset}}
+      {{- if .ProfileRatingLine }}
+      {{.ProfileRatingLine}}
+      {{- end }}
+      {{- if .ProfileRecordLine }}
+      {{.ProfileRecordLine}}
+      {{- end }}
+      • 플레이어는 백으로 시작합니다.
+      
+      이동 방법: `{{.Prefix}} <수>`.
+      무르기 기능: `{{.Prefix}} 무르기`.
+      난이도 선택: level1~level8.
+  status:
+    body: |
+      ♞ 체스 현황
+      • 난이도 {{.Preset}}
+      • 진행 {{.MoveCount}}수
+      {{- if .RecentLine }}
+      {{.RecentLine}}
+      {{- end }}
+      {{- if .ProfileInfo }}
+      {{.ProfileInfo}}
+      {{- end }}
+      {{- if .MaterialLine }}
+      {{.MaterialLine}}
+      {{- end }}
+      {{- if .CapturedLine }}
+      {{.CapturedLine}}
+      {{- end }}
+      
+      명령: `{{.Prefix}} <수>` (SAN/UCI)
+      기권: `{{.Prefix}} 기권`
+      무르기: `{{.Prefix}} 무르기`.
+  resign:
+    body: |
+      🏳️ 기권 처리되었습니다.
+      {{- if .OutcomeText }}
+      {{.OutcomeText}}
+      {{- else }}
+      🛑 기권하여 패배로 기록되었습니다.
+      {{- end }}
+      {{- if .ProfileInfo }}
+      
+      {{.ProfileInfo}}
+      {{- end }}
+  move:
+    body: |
+      {{.OutcomeText}}
+      
+      • 난이도: {{.Preset}}
+      {{- if .RatingLine }}
+      {{.RatingLine}}
+      {{- end }}
+      {{- if .RecordLine }}
+      {{.RecordLine}}
+      {{- end }}
+      {{- if .GameIDLine }}
+      {{.GameIDLine}}
+      {{- end }}
+  undo:
+    body: |
+      ↩️ 마지막 한 수를 되돌렸습니다.
+      • 난이도: {{.Preset}}
+      • 현재 진행 수: {{.MoveCount}}
+      {{- if .ProfileInfo }}
+      {{.ProfileInfo}}
+      {{- end }}
+      {{- if .MaterialLine }}
+      {{.MaterialLine}}
+      {{- end }}
+      {{- if .CapturedLine }}
+      {{.CapturedLine}}
+      {{- end }}
+      
+      이제 다시 당신의 턴입니다. `{{.Prefix}} <수>` 형식으로 새 수를 입력하세요.
+      최근 기록은 `{{.Prefix}} 기록`으로 확인할 수 있습니다.
+  preferred_updated:
+    body: |
+      ✅ 선호 난이도를 {{.PreferredPreset}}로 설정했습니다.
+      {{- if .ProfileInfo }}
+      {{.ProfileInfo}}
+      {{- end }}
+      새 게임 시작: `{{.Prefix}} 시작`
+  no_session:
+    body: "진행 중인 체스 게임이 없습니다. `{{.Prefix}} 시작`으로 새 게임을 시작하세요."
+  history:
+    header: "♜ 최근 기보"
+    footer: "\n자세히 보려면 `{{.Prefix}} 기보 <ID>` 명령을 사용하세요."
+  profile:
+    header: "♞ 체스 프로필"

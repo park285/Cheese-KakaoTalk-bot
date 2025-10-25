@@ -23,12 +23,19 @@ type MoveHighlight struct {
 }
 
 type RenderOptions struct {
-	Highlight *MoveHighlight
-	Player    *PlayerMarker
-	Material  MaterialScore
-	Captured  CapturedPieces
-	HUDHeader string
-	HUDTurn   string
+    Highlight *MoveHighlight
+    Player    *PlayerMarker
+    Material  MaterialScore
+    Captured  CapturedPieces
+    HUDHeader string
+    HUDTurn   string
+    // Flip: 흑 시점(아래가 8랭크)으로 보드 뒤집기
+    Flip bool
+    // ViewerColor: 뷰어(수신자)의 진영. 하이라이트 표현 기준 결정.
+    // - 내 수: 노란 사각형(채움)
+    // - 상대 수: 하늘색 화살표
+    // 값이 NoColor이면 기존(백=사각형, 흑=화살표) 규칙을 사용.
+    ViewerColor nchess.Color
 }
 
 type PlayerMarker struct {
@@ -36,7 +43,7 @@ type PlayerMarker struct {
 }
 
 type BoardRenderer interface {
-	RenderPNG(ctx context.Context, board *nchess.Board, opts RenderOptions) ([]byte, error)
+    RenderPNG(ctx context.Context, board *nchess.Board, opts RenderOptions) ([]byte, error)
 }
 
 type svgBoardRenderer struct {
@@ -109,16 +116,16 @@ func (r *svgBoardRenderer) RenderPNG(ctx context.Context, board *nchess.Board, o
 		scoreOffsetY,
 		shadowOffsetY,
 	)
-	drawSquares(img, squareSize, boardOrigin)
-	if err := drawPieces(img, board, squareSize, boardOrigin); err != nil {
-		return nil, err
-	}
-	drawHighlight(img, board, opts.Highlight, squareSize, boardOrigin)
-	drawPlayerMarker(img, board, opts.Player, squareSize, boardOrigin)
+    drawSquares(img, squareSize, boardOrigin, opts.Flip)
+    if err := drawPieces(img, board, squareSize, boardOrigin, opts.Flip); err != nil {
+        return nil, err
+    }
+    drawHighlight(img, board, opts.Highlight, squareSize, boardOrigin, opts)
+    drawPlayerMarker(img, board, opts.Player, squareSize, boardOrigin, opts.Flip)
 
-	if err := drawCoordinates(img, squareSize, boardOrigin, sideMargin); err != nil {
-		return nil, err
-	}
+    if err := drawCoordinates(img, squareSize, boardOrigin, sideMargin, opts.Flip); err != nil {
+        return nil, err
+    }
 
 	select {
 	case <-ctx.Done():
@@ -163,28 +170,26 @@ func drawBoardShadow(img *image.RGBA, boardRect image.Rectangle) {
 	imagedraw.Draw(img, shadowRect, image.NewUniform(boardShadowColor), image.Point{}, imagedraw.Over)
 }
 
-func drawSquares(dst imagedraw.Image, squareSize int, origin image.Point) {
-	ranks := []nchess.Rank{nchess.Rank8, nchess.Rank7, nchess.Rank6, nchess.Rank5, nchess.Rank4, nchess.Rank3, nchess.Rank2, nchess.Rank1}
-	files := []nchess.File{nchess.FileA, nchess.FileB, nchess.FileC, nchess.FileD, nchess.FileE, nchess.FileF, nchess.FileG, nchess.FileH}
-
-	for row, rank := range ranks {
-		for col, file := range files {
-			x := origin.X + col*squareSize
-			y := origin.Y + row*squareSize
-			sq := nchess.NewSquare(file, rank)
-			clr := squareColor(sq)
-			imagedraw.Draw(dst, image.Rect(x, y, x+squareSize, y+squareSize), image.NewUniform(clr), image.Point{}, imagedraw.Src)
-		}
-	}
+func drawSquares(dst imagedraw.Image, squareSize int, origin image.Point, flip bool) {
+    ranks := rankOrder(flip)
+    files := fileOrder(flip)
+    for _, rank := range ranks {
+        for _, file := range files {
+            sq := nchess.NewSquare(file, rank)
+            rect := squareRect(sq, squareSize, origin, flip)
+            clr := squareColor(sq)
+            imagedraw.Draw(dst, rect, image.NewUniform(clr), image.Point{}, imagedraw.Src)
+        }
+    }
 }
 
-func drawPieces(dst imagedraw.Image, board *nchess.Board, squareSize int, origin image.Point) error {
+func drawPieces(dst imagedraw.Image, board *nchess.Board, squareSize int, origin image.Point, flip bool) error {
 	boardMap := board.SquareMap()
-	ranks := []nchess.Rank{nchess.Rank8, nchess.Rank7, nchess.Rank6, nchess.Rank5, nchess.Rank4, nchess.Rank3, nchess.Rank2, nchess.Rank1}
-	files := []nchess.File{nchess.FileA, nchess.FileB, nchess.FileC, nchess.FileD, nchess.FileE, nchess.FileF, nchess.FileG, nchess.FileH}
+	ranks := rankOrder(flip)
+	files := fileOrder(flip)
 
-	for row, rank := range ranks {
-		for col, file := range files {
+	for _, rank := range ranks {
+		for _, file := range files {
 			sq := nchess.NewSquare(file, rank)
 			piece := boardMap[sq]
 			if piece == nchess.NoPiece {
@@ -194,27 +199,38 @@ func drawPieces(dst imagedraw.Image, board *nchess.Board, squareSize int, origin
 			if err != nil {
 				return err
 			}
-			x := origin.X + col*squareSize
-			y := origin.Y + row*squareSize
-			imagedraw.Draw(dst, image.Rect(x, y, x+squareSize, y+squareSize), img, image.Point{}, imagedraw.Over)
+			rect := squareRect(sq, squareSize, origin, flip)
+			imagedraw.Draw(dst, rect, img, image.Point{}, imagedraw.Over)
 		}
 	}
 	return nil
 }
 
-func drawHighlight(img *image.RGBA, board *nchess.Board, highlight *MoveHighlight, squareSize int, origin image.Point) {
-	if highlight == nil {
-		return
-	}
-	switch moverColor, ok := moveHighlightMoverColor(board, highlight); {
-	case ok && moverColor == nchess.Black:
-		drawArrow(img, highlight.From, highlight.To, squareSize, origin, blackMoveHighlightArrow)
-	case ok && moverColor == nchess.White:
-		drawSquareOverlay(img, highlight.From, squareSize, origin, whiteMoveHighlightFill)
-		drawSquareOverlay(img, highlight.To, squareSize, origin, whiteMoveHighlightFill)
-	default:
-		drawArrow(img, highlight.From, highlight.To, squareSize, origin, neutralMoveHighlightArrow)
-	}
+func drawHighlight(img *image.RGBA, board *nchess.Board, highlight *MoveHighlight, squareSize int, origin image.Point, opts RenderOptions) {
+    if highlight == nil {
+        return
+    }
+    moverColor, ok := moveHighlightMoverColor(board, highlight)
+    if !ok {
+        drawArrow(img, highlight.From, highlight.To, squareSize, origin, neutralMoveHighlightArrow, opts.Flip)
+        return
+    }
+    if opts.ViewerColor != nchess.NoColor {
+        if moverColor == opts.ViewerColor {
+            drawSquareOverlay(img, highlight.From, squareSize, origin, whiteMoveHighlightFill, opts.Flip)
+            drawSquareOverlay(img, highlight.To, squareSize, origin, whiteMoveHighlightFill, opts.Flip)
+        } else {
+            drawArrow(img, highlight.From, highlight.To, squareSize, origin, blackMoveHighlightArrow, opts.Flip)
+        }
+        return
+    }
+    // fallback(레거시): 백=사각형, 흑=화살표
+    if moverColor == nchess.Black {
+        drawArrow(img, highlight.From, highlight.To, squareSize, origin, blackMoveHighlightArrow, opts.Flip)
+    } else {
+        drawSquareOverlay(img, highlight.From, squareSize, origin, whiteMoveHighlightFill, opts.Flip)
+        drawSquareOverlay(img, highlight.To, squareSize, origin, whiteMoveHighlightFill, opts.Flip)
+    }
 }
 
 func moveHighlightMoverColor(board *nchess.Board, highlight *MoveHighlight) (nchess.Color, bool) {
@@ -363,31 +379,31 @@ func drawHUD(
 	drawCenteredString(drawer, turnRect, turnText, hudTurnTextColor)
 }
 
-func drawPlayerMarker(img *image.RGBA, board *nchess.Board, marker *PlayerMarker, squareSize int, origin image.Point) {
-	if img == nil || marker == nil {
-		return
-	}
-	clr := playerMarkerColor(board, marker.Square)
-	drawSquareOverlay(img, marker.Square, squareSize, origin, clr)
+func drawPlayerMarker(img *image.RGBA, board *nchess.Board, marker *PlayerMarker, squareSize int, origin image.Point, flip bool) {
+    if img == nil || marker == nil {
+        return
+    }
+    clr := playerMarkerColor(board, marker.Square)
+    drawSquareOverlay(img, marker.Square, squareSize, origin, clr, flip)
 }
 
-func drawSquareOverlay(img *image.RGBA, sq nchess.Square, squareSize int, origin image.Point, clr color.Color) {
-	if img == nil {
-		return
-	}
-	rect := squareRect(sq, squareSize, origin)
-	imagedraw.Draw(img, rect, image.NewUniform(clr), image.Point{}, imagedraw.Over)
+func drawSquareOverlay(img *image.RGBA, sq nchess.Square, squareSize int, origin image.Point, clr color.Color, flip bool) {
+    if img == nil {
+        return
+    }
+    rect := squareRect(sq, squareSize, origin, flip)
+    imagedraw.Draw(img, rect, image.NewUniform(clr), image.Point{}, imagedraw.Over)
 }
 
-func drawArrow(img *image.RGBA, from, to nchess.Square, squareSize int, origin image.Point, clr color.Color) {
+func drawArrow(img *image.RGBA, from, to nchess.Square, squareSize int, origin image.Point, clr color.Color, flip bool) {
 	if img == nil {
 		return
 	}
 	if from == to {
 		return
 	}
-	startRect := squareRect(from, squareSize, origin)
-	endRect := squareRect(to, squareSize, origin)
+    startRect := squareRect(from, squareSize, origin, flip)
+    endRect := squareRect(to, squareSize, origin, flip)
 	start := startRect.Max
 	start.X = startRect.Min.X + squareSize/2
 	start.Y = startRect.Min.Y + squareSize/2
@@ -565,7 +581,7 @@ func formatMaterialDiff(material MaterialScore) string {
 	return fmt.Sprintf("%+d", diff)
 }
 
-func drawCoordinates(dst imagedraw.Image, squareSize int, origin image.Point, margin int) error {
+func drawCoordinates(dst imagedraw.Image, squareSize int, origin image.Point, margin int, flip bool) error {
 	face, err := fontassets.CaptionFace()
 	if err != nil {
 		return err
@@ -576,8 +592,8 @@ func drawCoordinates(dst imagedraw.Image, squareSize int, origin image.Point, ma
 		Face: face,
 	}
 
-	ranks := []nchess.Rank{nchess.Rank8, nchess.Rank7, nchess.Rank6, nchess.Rank5, nchess.Rank4, nchess.Rank3, nchess.Rank2, nchess.Rank1}
-	files := []nchess.File{nchess.FileA, nchess.FileB, nchess.FileC, nchess.FileD, nchess.FileE, nchess.FileF, nchess.FileG, nchess.FileH}
+	ranks := rankOrder(flip)
+	files := fileOrder(flip)
 
 	ascent := face.Metrics().Ascent.Ceil()
 
@@ -682,14 +698,34 @@ func floatToUint8(v float64) uint8 {
 	return uint8(v + 0.5)
 }
 
-func squareRect(sq nchess.Square, squareSize int, origin image.Point) image.Rectangle {
-	file := int(sq.File())
-	rank := int(sq.Rank())
-	row := 7 - rank
-	col := file
-	x := origin.X + col*squareSize
-	y := origin.Y + row*squareSize
-	return image.Rect(x, y, x+squareSize, y+squareSize)
+func squareRect(sq nchess.Square, squareSize int, origin image.Point, flip bool) image.Rectangle {
+    file := int(sq.File())
+    rank := int(sq.Rank())
+    var row, col int
+    if !flip {
+        row = 7 - rank
+        col = file
+    } else {
+        row = rank
+        col = 7 - file
+    }
+    x := origin.X + col*squareSize
+    y := origin.Y + row*squareSize
+    return image.Rect(x, y, x+squareSize, y+squareSize)
+}
+
+func rankOrder(flip bool) []nchess.Rank {
+    if !flip {
+        return []nchess.Rank{nchess.Rank8, nchess.Rank7, nchess.Rank6, nchess.Rank5, nchess.Rank4, nchess.Rank3, nchess.Rank2, nchess.Rank1}
+    }
+    return []nchess.Rank{nchess.Rank1, nchess.Rank2, nchess.Rank3, nchess.Rank4, nchess.Rank5, nchess.Rank6, nchess.Rank7, nchess.Rank8}
+}
+
+func fileOrder(flip bool) []nchess.File {
+    if !flip {
+        return []nchess.File{nchess.FileA, nchess.FileB, nchess.FileC, nchess.FileD, nchess.FileE, nchess.FileF, nchess.FileG, nchess.FileH}
+    }
+    return []nchess.File{nchess.FileH, nchess.FileG, nchess.FileF, nchess.FileE, nchess.FileD, nchess.FileC, nchess.FileB, nchess.FileA}
 }
 
 func pointInTriangleFloat(x, y float64, a, b, c pointF) bool {

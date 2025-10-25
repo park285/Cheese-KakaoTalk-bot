@@ -35,16 +35,29 @@ type AppConfig struct {
 
     // When true, run in PvP-only mode: do not initialize single-player engine/service
     PvpOnly bool
+
+    // IgnoreSenders: 표시명이 이 목록에 포함되면 무시
+    IgnoreSenders []string
+
+    // START_IMAGE_DELAY_MS: PvP 시작 안내에서 텍스트 후 이미지 전송 전 대기(ms)
+    // 기본 150ms
+    StartImageDelayMS int
+
+    // FANOUT_IMAGE_DELAY_MS: 방 간 전송 간격(ms) — 이미지 드롭 완화용
+    // 기본 200ms
+    FanoutImageDelayMS int
 }
 
 func Load() (*AppConfig, error) {
-	cfg := &AppConfig{
+    cfg := &AppConfig{
 		AllowRandomMatch:   false,
 		MaxConcurrentGames: 200,
 		ChessDefaultPreset: "level3",
 		ChessSessionTTLSec: 3600,
-		ChessHistoryLimit:  10,
-	}
+        ChessHistoryLimit:   10,
+        StartImageDelayMS:   150,
+        FanoutImageDelayMS:  200,
+    }
 
 	cfg.IrisBaseURL = strings.TrimSpace(os.Getenv("IRIS_BASE_URL"))
 	cfg.IrisWSURL = strings.TrimSpace(os.Getenv("IRIS_WS_URL"))
@@ -111,6 +124,46 @@ func Load() (*AppConfig, error) {
     if v := strings.TrimSpace(os.Getenv("CHESS_PVP_ONLY")); v != "" {
         if b, err := strconv.ParseBool(v); err == nil {
             cfg.PvpOnly = b
+        }
+    }
+
+    // Optional: ignore specific senders (comma-separated names)
+    if v := strings.TrimSpace(os.Getenv("CHESS_IGNORE_SENDERS")); v != "" {
+        parts := strings.Split(v, ",")
+        for _, p := range parts {
+            s := strings.TrimSpace(p)
+            if s != "" {
+                cfg.IgnoreSenders = append(cfg.IgnoreSenders, s)
+            }
+        }
+    }
+    if len(cfg.IgnoreSenders) == 0 { // fallback env key
+        if v := strings.TrimSpace(os.Getenv("IGNORE_SENDERS")); v != "" {
+            parts := strings.Split(v, ",")
+            for _, p := range parts {
+                s := strings.TrimSpace(p)
+                if s != "" {
+                    cfg.IgnoreSenders = append(cfg.IgnoreSenders, s)
+                }
+            }
+        }
+    }
+    if len(cfg.IgnoreSenders) == 0 {
+        // 기본값: Iris(알림/봇 계정) 무시
+        cfg.IgnoreSenders = []string{"Iris"}
+    }
+
+    // START_IMAGE_DELAY_MS (milliseconds)
+    if v := strings.TrimSpace(os.Getenv("START_IMAGE_DELAY_MS")); v != "" {
+        if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+            cfg.StartImageDelayMS = n
+        }
+    }
+
+    // FANOUT_IMAGE_DELAY_MS (milliseconds)
+    if v := strings.TrimSpace(os.Getenv("FANOUT_IMAGE_DELAY_MS")); v != "" {
+        if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+            cfg.FanoutImageDelayMS = n
         }
     }
 

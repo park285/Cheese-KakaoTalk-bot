@@ -18,6 +18,8 @@ logs/
 *.log
 *.tmp
 *.pid
+chess-bot
+/image.png
 
 # editor/OS noise
 .vscode/

@@ -58,9 +58,9 @@ func TestThirdJoinRejected(t *testing.T) {
     mr, err := m.Make(ctx, "roomA", "u1", "u1", ColorRandom)
     if err != nil { t.Fatalf("Make: %v", err) }
     if _, err := m.Join(ctx, "roomB", mr.Code, "u2", "u2", ColorRandom); err != nil { t.Fatalf("Join#1: %v", err) }
-    // Third join should fail with ErrFull
+    // Third join should fail
     if _, err := m.Join(ctx, "roomC", mr.Code, "u3", "u3", ColorRandom); err == nil {
-        t.Fatalf("expected ErrFull on third join")
+        t.Fatalf("expected error on third join")
     }
 }
 
@@ -80,6 +80,31 @@ func TestRoomsByUserAndGame(t *testing.T) {
     rooms, err := m.RoomsByUserAndGame(ctx, "u2", g.ID)
     if err != nil { t.Fatalf("RoomsByUserAndGame: %v", err) }
     if len(rooms) != 2 { t.Fatalf("expected 2 rooms, got %d (%v)", len(rooms), rooms) }
+}
+
+func TestJoinUsesProvidedUserName(t *testing.T) {
+    m, chessMgr, cleanup := newTestManagers(t)
+    defer cleanup()
+    ctx := context.Background()
+
+    mr, err := m.Make(ctx, "roomA", "u1", "Alice", ColorRandom)
+    if err != nil { t.Fatalf("Make: %v", err) }
+    jr, err := m.Join(ctx, "roomB", mr.Code, "u2", "Bob", ColorRandom)
+    if err != nil { t.Fatalf("Join: %v", err) }
+    if !jr.Started { t.Fatalf("game not started") }
+
+    g, err := chessMgr.GetActiveGameByUser(ctx, "u2")
+    if err != nil || g == nil { t.Fatalf("GetActiveGameByUser: %v", err) }
+    // Expect names to be reflected
+    names := []string{g.WhiteName, g.BlackName}
+    foundAlice, foundBob := false, false
+    for _, n := range names {
+        if n == "Alice" { foundAlice = true }
+        if n == "Bob" { foundBob = true }
+    }
+    if !foundAlice || !foundBob {
+        t.Fatalf("expected names Alice and Bob in game participants, got: %v vs %v", g.WhiteName, g.BlackName)
+    }
 }
 
 func TestMakeBlockedIfActiveGameInSameRoom(t *testing.T) {
@@ -114,5 +139,20 @@ func TestJoinBlockedIfUserActiveInSameRoom(t *testing.T) {
     // Attempt to join from roomB as u2 → should be blocked due to active game in roomB
     if _, err := m.Join(ctx, "roomB", mr.Code, "u2", "u2", ColorRandom); err == nil {
         t.Fatalf("expected ErrPlayerBusyInRoom on Join when user has active game in same room")
+    }
+}
+
+func TestMakeRestrictedDuplicateCreator(t *testing.T) {
+    m, _, cleanup := newTestManagers(t)
+    defer cleanup()
+    ctx := context.Background()
+
+    // first lobby ok
+    if _, err := m.Make(ctx, "roomA", "u1", "u1", ColorRandom); err != nil {
+        t.Fatalf("first Make: %v", err)
+    }
+    // second lobby by same user should be rejected while first is LOBBY
+    if _, err := m.Make(ctx, "roomB", "u1", "u1", ColorRandom); err == nil {
+        t.Fatalf("expected ErrCreatorHasLobby on duplicate creator lobby")
     }
 }

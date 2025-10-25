@@ -2,7 +2,6 @@ package errors
 
 import "fmt"
 
-// Error codes
 const (
 	CodeBotError    = "BOT_ERROR"
 	CodeAPIError    = "API_ERROR"

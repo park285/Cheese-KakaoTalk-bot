@@ -77,8 +77,8 @@ func (c *Client) SendMessage(ctx context.Context, room, message string) error {
 }
 
 func (c *Client) SendImage(ctx context.Context, room, imageBase64 string) error {
-	req := ImageReplyRequest{Type: "image", Room: room, Data: imageBase64}
-	return c.doJSON(ctx, fasthttp.MethodPost, "/reply", req, nil, false)
+    req := ReplyRequest{Type: "image", Room: room, Data: imageBase64}
+    return c.doJSON(ctx, fasthttp.MethodPost, "/reply", req, nil, false)
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, in any, out any, retry bool) error {
